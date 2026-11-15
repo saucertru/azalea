@@ -17,7 +17,7 @@ export const CONFIG = {
   // Large files (over 25 MB) live in a Cloudflare R2 bucket. Put the
   // bucket's public URL here, e.g. 'https://pub-xxxxxxxx.r2.dev'.
   // The build lists the bucket and adds its files to the site.
-  mediaUrl: '',
+  mediaUrl: 'https://pub-2fac51d89b02441bbf0005ec8bcbd3c0.r2.dev',
 
   // Optional. A free YouTube Data API v3 key turns on YouTube search in
   // Music. Without it you can still paste YouTube links.
