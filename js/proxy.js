@@ -1,4 +1,6 @@
-// Scramjet web proxy (needs the Node server: `npm start`, e.g. on Render).
+// Scramjet web proxy. The proxy files are served by the website itself;
+// the Wisp server (what actually fetches sites) can be elsewhere, e.g. Render.
+import { CONFIG } from './config.js';
 const FILES = {
   wasm: '/scram/scramjet.wasm.wasm',
   all: '/scram/scramjet.all.js',
@@ -6,6 +8,24 @@ const FILES = {
 };
 const TRANSPORT = '/libcurl/index.mjs';
 export const SEARCH = 'https://duckduckgo.com/?q=%s';
+
+/** The Wisp server: CONFIG.wispUrl, or this site's own /wisp/ */
+export function wispUrl() {
+  return CONFIG.wispUrl || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/wisp/`;
+}
+
+let woke = false;
+/** Free Render servers sleep after 15 minutes; poke it so it's awake by the time it's needed. */
+export function wakeWisp() {
+  if (woke || !CONFIG.wispUrl) return;
+  woke = true;
+  try {
+    const u = new URL(CONFIG.wispUrl);
+    u.protocol = u.protocol === 'ws:' ? 'http:' : 'https:';
+    u.pathname = '/health';
+    fetch(u, { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
+  } catch {}
+}
 
 let available = null;
 let readyPromise = null;
@@ -36,7 +56,8 @@ function loadScript(src) {
 export function proxyReady() {
   if (!readyPromise) {
     readyPromise = (async () => {
-      if (!(await proxyAvailable())) throw new Error('The web proxy isn’t running on this server.');
+      wakeWisp();
+      if (!(await proxyAvailable())) throw new Error('The web proxy files aren’t on this site (run the Pages build or the Node server).');
       if (!('serviceWorker' in navigator)) throw new Error('This browser blocks service workers (the site must be on https).');
       await loadScript(FILES.all);
       await loadScript('/baremux/index.js');
@@ -45,11 +66,18 @@ export function proxyReady() {
       await controller.init();
       await navigator.serviceWorker.register('/sw.js', { scope: '/' });
       await navigator.serviceWorker.ready;
-      const conn = new window.BareMux.BareMuxConnection('/baremux/worker.js');
-      const wispUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/wisp/`;
-      if ((await conn.getTransport()) !== TRANSPORT) {
-        await conn.setTransport(TRANSPORT, [{ websocket: wispUrl }]);
+      // First visit: wait until the worker controls this page, otherwise the
+      // first site can load before the worker can reach the proxy connection.
+      if (!navigator.serviceWorker.controller) {
+        await new Promise((resolve) => {
+          const done = () => { clearTimeout(t); resolve(); };
+          const t = setTimeout(done, 4000);
+          navigator.serviceWorker.addEventListener('controllerchange', done, { once: true });
+        });
       }
+      const conn = new window.BareMux.BareMuxConnection('/baremux/worker.js');
+      // always (re)set: the Wisp address may have changed since last visit
+      await conn.setTransport(TRANSPORT, [{ websocket: wispUrl() }]);
       return controller;
     })().catch((e) => {
       readyPromise = null;

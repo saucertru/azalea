@@ -9,6 +9,16 @@ export const CONFIG = {
   supabaseUrl: 'https://uqnrsgppnjuurbkviqrr.supabase.co',
   supabaseAnonKey: 'sb_publishable_sF6ItCyEXN2B8DZTIVg3cQ_SYWDmar0',
 
+  // Web proxy: the Wisp server that fetches websites. Blank = the same
+  // server as the site. Set it when the site is on Cloudflare Pages and
+  // the Wisp server is on Render.
+  wispUrl: 'wss://azalea-3rwy.onrender.com/wisp/',
+
+  // Large files (over 25 MB) live in a Cloudflare R2 bucket. Put the
+  // bucket's public URL here, e.g. 'https://pub-xxxxxxxx.r2.dev'.
+  // The build lists the bucket and adds its files to the site.
+  mediaUrl: 'https://pub-2fac51d89b02441bbf0005ec8bcbd3c0.r2.dev',
+
   // Optional. A free YouTube Data API v3 key turns on YouTube search in
   // Music. Without it you can still paste YouTube links.
   youtubeApiKey: '',

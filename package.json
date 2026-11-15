@@ -1,11 +1,12 @@
 {
   "name": "azelela",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Azelela - games, music, videos, books, chat, web and more",
   "scripts": {
     "start": "node server/index.mjs",
     "build": "node scripts/build-manifest.cjs",
+    "build:pages": "node scripts/build-static.cjs",
     "dev": "node scripts/serve.cjs"
   },
   "engines": {
@@ -17,6 +18,7 @@
     "@mercuryworkshop/libcurl-transport": "^1.5.2",
     "@mercuryworkshop/scramjet": "1.1.0",
     "@mercuryworkshop/wisp-js": "^0.4.1",
+    "aws4fetch": "^1.0.20",
     "fastify": "^5.7.4"
   }
 }

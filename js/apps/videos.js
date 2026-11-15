@@ -41,7 +41,9 @@ export default {
     let saveT;
     function open(v) {
       if (musicPlayer.playing) musicPlayer.toggle(); // don't play two things at once
-      const video = h('video', { class: 'video-el', src: v.src, controls: true, autoplay: true, playsinline: true, preload: 'metadata' });
+      // subtitles from another site (R2) only load when the video is fetched with CORS
+      const remoteSubs = v.subtitles && /^https?:/.test(v.subtitles) && !v.subtitles.startsWith(location.origin);
+      const video = h('video', { class: 'video-el', src: v.src, controls: true, autoplay: true, playsinline: true, preload: 'metadata', crossorigin: remoteSubs ? 'anonymous' : null });
       if (v.subtitles) video.append(h('track', { kind: 'subtitles', src: v.subtitles, srclang: 'en', label: 'Subtitles', default: true }));
       const saved = progress[v.id];
       video.addEventListener('loadedmetadata', () => {

@@ -33,12 +33,6 @@
     document.body.appendChild(d);
   }
 
-  // only allow files from this site's games folder
-  if (!/^games\//.test(src) || /\.\.|:|\\/.test(src)) {
-    fail('Invalid game path.');
-    return;
-  }
-
   function load(url, onload) {
     var s = document.createElement('script');
     s.src = url;
@@ -47,6 +41,7 @@
     document.head.appendChild(s);
   }
 
+  function start() {
   if (type === 'flash') {
     window.RufflePlayer = window.RufflePlayer || {};
     window.RufflePlayer.config = { autoplay: 'on', unmuteOverlay: 'hidden', letterbox: 'on', backgroundColor: '#000000', contextMenu: 'rightClickOnly', splashScreen: true };
@@ -72,6 +67,17 @@
   } else {
     fail('Unknown game type.');
   }
+  }
+
+  // only allow files from this site's games folder, or the games folder of
+  // your R2 bucket (mediaUrl in js/config.js)
+  var local = /^games\//.test(src) && !/\.\.|:|\\/.test(src);
+  if (local) { start(); return; }
+  import('./js/config.js').then(function (m) {
+    var base = String((m.CONFIG && m.CONFIG.mediaUrl) || '').replace(/\/+$/, '');
+    if (base && /^https:\/\//.test(base) && src.indexOf(base + '/games/') === 0 && !/\.\./.test(src)) start();
+    else fail('Invalid game path.');
+  }).catch(function () { fail('Invalid game path.'); });
 })();
 </script>
 </body>
