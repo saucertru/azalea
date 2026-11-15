@@ -12,7 +12,7 @@ import { libcurlPath } from '@mercuryworkshop/libcurl-transport';
 import { baremuxPath } from '@mercuryworkshop/bare-mux/node';
 
 const require = createRequire(import.meta.url);
-const { buildManifest } = require('../scripts/build-manifest.cjs');
+const { buildManifestAsync } = require('../scripts/build-manifest.cjs');
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 // ---- Wisp (the part that actually fetches websites)
@@ -38,9 +38,22 @@ const fastify = Fastify({
       }),
 });
 
-// manifest.json is built on every request, so new files show up on refresh
-fastify.get('/manifest.json', (req, reply) => {
-  reply.header('Cache-Control', 'no-store').send(buildManifest());
+// manifest.json: local files + R2 (when R2_* env vars are set), rebuilt at
+// most once a minute so new files show up without redeploying
+let manifestCache = null;
+let manifestAt = 0;
+fastify.get('/manifest.json', async (req, reply) => {
+  if (!manifestCache || Date.now() - manifestAt > 60_000) {
+    manifestCache = buildManifestAsync().then((r) => r.manifest);
+    manifestAt = Date.now();
+  }
+  reply.header('Cache-Control', 'no-store');
+  return manifestCache;
+});
+
+// the website (e.g. on Cloudflare Pages) calls this to wake Render up early
+fastify.get('/health', (req, reply) => {
+  reply.header('Access-Control-Allow-Origin', '*').header('Cache-Control', 'no-store').send('ok');
 });
 
 // proxy files

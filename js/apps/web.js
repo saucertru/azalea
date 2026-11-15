@@ -55,7 +55,28 @@ export default {
     el.append(h('div', { class: 'web-page' }, bar, h('div', { class: 'web-frame-wrap' }, frame, loading)));
 
     // keep the address bar / tab title in step as you click around
+    // The first connection can fail while the proxy server wakes up (free
+    // Render servers sleep) or the proxy is still starting. Retry quietly
+    // a few times before showing Scramjet's error page.
+    const RETRY_DELAYS = [1000, 2500, 5000, 8000, 12000, 15000, 18000]; // ~60s total
+    let tries = 0;
+    const loadingText = loading.querySelector('.muted');
     frame.addEventListener('load', () => {
+      let failed = false;
+      try {
+        const d = frame.contentDocument;
+        failed = d?.title === 'Scramjet' && /error loading/i.test(d.body?.innerText || '');
+      } catch {}
+      if (failed && tries < RETRY_DELAYS.length && alive) {
+        const wait = RETRY_DELAYS[tries++];
+        if (!loading.isConnected) frame.parentElement.append(loading);
+        loadingText.textContent = tries === 1
+          ? `Connecting to the proxy… (it may be waking up)`
+          : `Still connecting… try ${tries + 1} of ${RETRY_DELAYS.length + 1}`;
+        setTimeout(() => { if (alive) try { frame.contentWindow.location.reload(); } catch { frame.src = frame.src; } }, wait);
+        return;
+      }
+      if (!failed) tries = 0; // reset once a page loads, so later clicks get retries too
       loading.remove();
       let real = null;
       let title = '';

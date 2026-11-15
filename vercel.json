@@ -1,11 +1,4 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": ".",
-  "cleanUrls": false,
-  "headers": [
-    {
-      "source": "/manifest.json",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
-    }
-  ]
+  "buildCommand": "npm run build:pages",
+  "outputDirectory": "dist"
 }

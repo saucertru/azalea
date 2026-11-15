@@ -8,7 +8,7 @@ import { APPS, APP_ORDER } from './apps/index.js';
 import { mountMini } from './apps/music.js';
 import { APP_COLORS, appTile, findApp, searchAll, webSearch, openGame, LOGO_SVG } from './appmeta.js';
 import { startPresence } from './presence.js';
-import { looksLikeUrl } from './proxy.js';
+import { looksLikeUrl, wakeWisp } from './proxy.js';
 import { mountClock, mountWeather, mountSystem } from './widgets.js';
 
 const appRoot = $('#app');
@@ -19,6 +19,7 @@ document.title = CONFIG.siteName;
 // =====================================================================
 async function boot() {
   applyTheme();
+  wakeWisp();
   try {
     await initAuth();
   } catch (e) {

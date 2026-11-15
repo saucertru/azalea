@@ -13,31 +13,91 @@ Choose a browser-style or desktop-style layout, 10 themes, and your own accent c
 
 ```bash
 npm install
-npm start          # full site + web proxy: http://localhost:8080
-npm run dev        # quick preview without the proxy, no install needed: http://localhost:3000
+npm start           # full site + web proxy: http://localhost:8080
+npm run dev         # quick preview without the proxy, no install needed: http://localhost:3000
+npm run build:pages # what Cloudflare Pages runs: builds the site into dist/
 ```
 
 Both re-scan the content folders every time the page loads, so new files show up when you refresh.
 You need Node.js 18 or newer.
 
-## Deploying on Render (with the web proxy)
+## How it's hosted
 
-1. Push the project to GitHub. `node_modules` is ignored.
-2. In Render, create a **New, then Web Service** from the repo. Or use **New, then Blueprint**, which reads `render.yaml` and fills this in for you.
-   - **Build command:** `npm install && npm run build`
-   - **Start command:** `npm start`
-3. Open the site on its `https://…onrender.com` address. The proxy's service worker needs https; Render gives you that automatically.
+| Part | Where | What it does |
+|---|---|---|
+| Website | **Cloudflare Pages** | The whole site, plus the Scramjet proxy files. It never sleeps, so it always loads instantly. |
+| Large files (over 25 MB) | **Cloudflare R2** | Big ROMs, webports, videos, music and PDFs. Free downloads. |
+| Wisp server | **Render** | The part of the web proxy that actually fetches websites. |
 
-`server/index.mjs` serves the site, the Scramjet files (`/scram/`, `/baremux/`, `/libcurl/`) and a Wisp server at `/wisp/`.
-It never serves `node_modules`, `server/`, `scripts/`, `supabase/` or hidden files.
+The site connects to Render using `wispUrl` in `js/config.js`. Free Render servers sleep after 15 minutes.
+The site pings Render as soon as someone opens it, and the Web app retries for up to about a minute while Render wakes up.
+
+### 1. Render (Wisp server)
+
+Already set up. The service runs `server/index.mjs`, and nothing needs to change there.
+- **Build command:** `npm install && npm run build` (or Render's pnpm equivalent)
+- **Start command:** `npm start` or `node index.js`
+
+The Render address still shows the full site too, which is handy as a backup.
 
 **Web proxy safety settings** (in `server/index.mjs`):
 - It can't reach private or internal network addresses.
 - It looks up sites with Cloudflare's family DNS (1.1.1.3), which blocks malware and adult sites.
-  If sites won't load on your host, add the environment variable `SAFE_DNS=off` in Render to use normal DNS instead.
+  If sites won't load, add the environment variable `SAFE_DNS=off` in Render to use normal DNS instead.
 - Add sites to block in `hostname_blacklist`.
 
-On a static host (Vercel, GitHub Pages) everything else still works. Websites just open in a normal browser tab instead of through the proxy.
+### 2. R2 (large files)
+
+1. In the Cloudflare dashboard, open **R2 Object Storage** and click **Create bucket**. Name it something like `azalea-media`.
+2. Open the bucket's **Settings** and find **Public Development URL**. Click **Enable**, then copy the `https://pub-….r2.dev` address.
+   Paste it into `js/config.js` as `mediaUrl`, then push.
+3. In the same **Settings** page, find **CORS Policy**, click **Add CORS policy** and paste the policy below.
+   This lets the emulator load ROMs from R2.
+   ```json
+   [
+     {
+       "AllowedOrigins": ["*"],
+       "AllowedMethods": ["GET", "HEAD"],
+       "AllowedHeaders": ["*"],
+       "ExposeHeaders": ["Content-Length", "Content-Range", "Accept-Ranges"],
+       "MaxAgeSeconds": 86400
+     }
+   ]
+   ```
+4. Back on the R2 overview page, click **Manage API tokens**, then **Create API token**:
+   - **Permission:** Object Read only
+   - **Bucket:** apply it to your bucket only
+
+   Copy the **Access Key ID** and **Secret Access Key**. The secret is only shown once. Also note your **Account ID**, shown on the R2 overview page.
+5. **Upload files** using the same folders as the site, for example `games/roms/n64/game.z64`, `games/webports/MyGame/index.html` or `videos/movie.mp4`.
+   A same-name image still works as a cover, and `game.json` still works for titles.
+
+The free `r2.dev` address is rate-limited and meant for testing. If you get a domain later, connect it under **Settings**, then **Custom Domains**, and use that as `mediaUrl`.
+
+### 3. Cloudflare Pages (website)
+
+1. In the Cloudflare dashboard, go to **Workers & Pages**, click **Create**, then **Pages**, then **Connect to Git**, and pick `saucertru/azalea`.
+2. Fill in the build settings:
+   - **Framework preset:** None
+   - **Build command:** `npm run build:pages`
+   - **Build output directory:** `dist`
+3. Under **Environment variables**, add these. Use **Encrypt** for the two keys.
+
+   | Name | Value |
+   |---|---|
+   | `NODE_VERSION` | `22` |
+   | `R2_ACCOUNT_ID` | your Cloudflare account ID |
+   | `R2_BUCKET` | `azalea-media` (your bucket name) |
+   | `R2_ACCESS_KEY_ID` | from step 2.4 |
+   | `R2_SECRET_ACCESS_KEY` | from step 2.4 |
+4. Click **Save and Deploy**. Your site will be at `https://<project>.pages.dev`.
+5. In Supabase, go to **Authentication**, then **URL Configuration**, and set **Site URL** to the new `pages.dev` address.
+
+**After uploading new files to R2**, redeploy Pages so the site lists them: go to **Deployments**, then **Retry deployment**.
+Pushing to GitHub redeploys automatically.
+
+The build log shows how many files came from R2, and warns if R2 couldn't be read.
+It also lists any file in the repo over 25 MiB that Pages can't host, so you know to move it to R2.
 
 ## Adding content (the auto-detect folders)
 
@@ -53,8 +113,8 @@ On a static host (Vercel, GitHub Pages) everything else still works. Websites ju
 
 Any item can have a same-name image as its cover, for example `game.gba` with `game.png`.
 
-When you deploy, `npm run build` scans the folders and writes `manifest.json`. Vercel runs it automatically (see `vercel.json`).
-On a host with no build step (such as GitHub Pages), run `npm run build` yourself and commit `manifest.json`.
+Files over 25 MB go in your **R2 bucket** instead, in the same folders (see **How it's hosted**).
+The Pages build lists the bucket and adds those files to the site automatically.
 
 Only add games, ROMs, music and videos you have the right to share.
 
@@ -73,6 +133,8 @@ Until the keys are added, the site runs in **setup mode**. Your profile is saved
 
 ## Optional settings (`js/config.js`)
 
+- `wispUrl`: the Wisp server for the web proxy (your Render address, `wss://…/wisp/`). Leave it blank to use the site's own server.
+- `mediaUrl`: your R2 bucket's public address, for files over 25 MB.
 - `youtubeApiKey`: a free YouTube Data API v3 key turns on YouTube search in Music. Without one, you can still paste YouTube links.
 - `liveChannels`: the official broadcaster live streams shown in TV. Each channel is a YouTube channel ID.
 - `archiveCollections`: the public-domain Internet Archive collections shown in TV.
@@ -108,6 +170,6 @@ js/proxy.js         Scramjet web proxy setup (lazy: only loads when you open a w
 sw.js               proxy service worker
 server/index.mjs    Node server for Render: site + proxy + Wisp
 render.yaml         Render Blueprint
-scripts/            manifest builder + dev server
+scripts/            manifest builder (local + R2), Pages build (build-static.cjs), dev server
 supabase/schema.sql database setup
 ```
