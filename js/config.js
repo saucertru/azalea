@@ -6,8 +6,8 @@ export const CONFIG = {
 
   // Supabase -> Project Settings -> API. The anon key is safe to put here
   // (Row Level Security in supabase/schema.sql protects the data).
-  supabaseUrl: '',
-  supabaseAnonKey: '',
+  supabaseUrl: 'https://uqnrsgppnjuurbkviqrr.supabase.co',
+  supabaseAnonKey: 'sb_publishable_sF6ItCyEXN2B8DZTIVg3cQ_SYWDmar0',
 
   // Optional. A free YouTube Data API v3 key turns on YouTube search in
   // Music. Without it you can still paste YouTube links.
