@@ -8,6 +8,7 @@ import { APPS, APP_ORDER } from './apps/index.js';
 import { mountMini } from './apps/music.js';
 import { APP_COLORS, appTile, findApp, searchAll, webSearch, openGame, LOGO_SVG } from './appmeta.js';
 import { startPresence } from './presence.js';
+import { looksLikeUrl } from './proxy.js';
 import { mountClock, mountWeather, mountSystem } from './widgets.js';
 
 const appRoot = $('#app');
@@ -302,7 +303,7 @@ on('settings', (s) => {
 // ---------------------------------------------------------------------
 function buildBrowser() {
   const scheme = `${CONFIG.siteName.toLowerCase().replace(/[^a-z0-9]/g, '')}://`;
-  const RAIL_APPS = ['games', 'music', 'videos', 'pdfs', 'books', 'tv', 'ai', 'chat'];
+  const RAIL_APPS = ['web', 'games', 'music', 'videos', 'pdfs', 'books', 'tv', 'ai', 'chat'];
 
   // ---- left icon rail
   const railBtn = (id) => h('button', { class: 'rail-btn', title: APPS[id].name, 'aria-label': APPS[id].name, dataset: { app: id }, html: icon(APPS[id].icon, 19), onClick: () => nav(id) });
@@ -340,6 +341,20 @@ function buildBrowser() {
   let seq = 0;
 
   function routeOf(tab) { return `${tab.appId}${toQuery(tab.params)}`; }
+  // web tabs show the real website address
+  function displayUrl(tab) { return tab.appId === 'web' && tab.params.url ? tab.params.url : `${scheme}${routeOf(tab)}`; }
+  function webLabel(url) { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'Web'; } }
+
+  // the Web app reports where the page went after clicking links
+  ctx.webNavigated = (view, url, title) => {
+    const t = tabs.find((x) => x.view === view);
+    if (!t || t.appId !== 'web') return;
+    t.params = { url };
+    t.hist[t.hi] = { appId: 'web', params: { url } };
+    t.label.textContent = title || webLabel(url);
+    t.el.title = title || url;
+    if (t === active) updateChrome();
+  };
 
   function newTab(appId = 'home', params = {}) {
     const view = h('div', { class: 'app-view' });
@@ -370,8 +385,8 @@ function buildBrowser() {
     tab.appId = appId;
     tab.params = params;
     tab.icon.innerHTML = icon(APPS[appId].icon, 14);
-    tab.label.textContent = APPS[appId].name;
-    tab.el.title = APPS[appId].name;
+    tab.label.textContent = appId === 'web' && params.url ? webLabel(params.url) : APPS[appId].name;
+    tab.el.title = appId === 'web' && params.url ? params.url : APPS[appId].name;
     tab.view.scrollTop = 0;
     tab.cleanup = mountApp(appId, tab.view, params);
     if (tab === active) updateChrome();
@@ -408,7 +423,7 @@ function buildBrowser() {
 
   function updateChrome() {
     const t = active;
-    if (document.activeElement !== address) address.value = `${scheme}${routeOf(t)}`;
+    if (document.activeElement !== address) address.value = displayUrl(t);
     backBtn.disabled = t.hi <= 0;
     fwdBtn.disabled = t.hi >= t.hist.length - 1;
     rail.querySelectorAll('.rail-btn').forEach((b) => b.classList.toggle('active', b.dataset.app === t.appId));
@@ -424,7 +439,7 @@ function buildBrowser() {
 
   // ---- address bar
   address.addEventListener('focus', () => address.select());
-  address.addEventListener('blur', () => active && (address.value = `${scheme}${routeOf(active)}`));
+  address.addEventListener('blur', () => active && (address.value = displayUrl(active)));
   address.addEventListener('keydown', async (e) => {
     if (e.key === 'Escape') { address.blur(); return; }
     if (e.key !== 'Enter') return;
@@ -433,11 +448,13 @@ function buildBrowser() {
     address.blur();
     const stripped = raw.replace(/^[a-z0-9]+:\/\//i, '').replace(/^\/+|\/+$/g, '');
     const [path, q] = stripped.split('?');
-    const id = findApp(path);
+    const isApp = /^[a-z0-9]+:\/\//i.test(raw) ? raw.toLowerCase().startsWith(scheme) : true;
+    const id = isApp ? findApp(path) : null;
     if (id) return nav(id, Object.fromEntries(new URLSearchParams(q || '')));
+    if (looksLikeUrl(raw)) return webSearch(raw, ctx);
     const r = await searchAll(raw);
     if (r.games.length) return nav('games', { q: raw });
-    webSearch(raw);
+    webSearch(raw, ctx);
   });
 
   // ---- keyboard: Alt+T new tab, Alt+W close tab
@@ -465,6 +482,7 @@ function buildBrowser() {
     layout: 'browser',
     cleanup() {
       browserNav = null;
+      ctx.webNavigated = null;
       window.removeEventListener('hashchange', onHash);
       document.removeEventListener('keydown', onKey);
       for (const t of tabs) { try { t.cleanup(); } catch (e) { console.error(e); } }
@@ -619,7 +637,7 @@ const wm = {
 
 function buildDesktop() {
   const DESK_APPS = APP_ORDER.filter((id) => id !== 'home');
-  const PINNED = ['games', 'music', 'videos', 'tv', 'chat', 'ai', 'books'];
+  const PINNED = ['web', 'games', 'music', 'videos', 'tv', 'chat', 'ai'];
 
   const icons = h('div', { class: 'desk-icons' }, DESK_APPS.map((id) =>
     h('button', { class: 'desk-icon', onClick: () => ctx.open(id), title: APPS[id].name },
@@ -668,7 +686,7 @@ function buildDesktop() {
     pick = [
       ...r.apps.map((id) => ({ label: APPS[id].name, sub: 'App', node: appTile(id, 28), run: () => ctx.open(id) })),
       ...r.games.map((g) => ({ label: g.title, sub: 'Game', node: appTile('games', 28), run: () => openGame(g, ctx) })),
-      { label: `Search the web for “${q}”`, sub: 'Web', node: h('span', { class: 'res-web', html: icon('globe', 16) }), run: () => webSearch(q) },
+      { label: `Search the web for “${q}”`, sub: 'Web', node: h('span', { class: 'res-web', html: icon('globe', 16) }), run: () => webSearch(q, ctx) },
     ];
     results.replaceChildren(...pick.map((p) => h('button', { class: 'res-item', onClick: () => { p.run(); searchInput.value = ''; closeResults(); } },
       p.node, h('span', { class: 'res-label' }, p.label), h('span', { class: 'res-sub' }, p.sub))));

@@ -25,7 +25,7 @@ export default {
       if (first) return first();
       const r = await searchAll(q);
       if (r.games.length) ctx.open('games', { q });
-      else webSearch(q);
+      else webSearch(q, ctx);
     };
     input.addEventListener('input', async () => {
       const q = input.value.trim();
@@ -36,7 +36,7 @@ export default {
       const items = [
         ...r.apps.map((id) => ({ ic: APPS[id].icon, label: APPS[id].name, sub: 'App', run: () => ctx.open(id) })),
         ...r.games.map((g) => ({ ic: 'games', label: g.title, sub: 'Game', run: () => openGame(g, ctx) })),
-        { ic: 'globe', label: `Search the web for “${q}”`, sub: 'Web', run: () => webSearch(q) },
+        { ic: 'globe', label: `Search the web for “${q}”`, sub: 'Web', run: () => webSearch(q, ctx) },
       ];
       first = items.length > 1 ? items[0].run : null;
       sugg.replaceChildren(...items.map((it) => h('button', { class: 'sugg-item', onClick: it.run },

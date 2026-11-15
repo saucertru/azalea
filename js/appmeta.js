@@ -3,10 +3,12 @@ import { h, icon } from './ui.js';
 import { APPS, APP_ORDER } from './apps/index.js';
 import { getManifest } from './data.js';
 import { launchGame } from './apps/games.js';
+import { proxyAvailable, toUrl } from './proxy.js';
 
 // gradient colours for app icons (desktop + home)
 export const APP_COLORS = {
   home: ['#60a5fa', '#2563eb'],
+  web: ['#818cf8', '#3b48d6'],
   games: ['#a78bfa', '#6d28d9'],
   music: ['#f472b6', '#db2777'],
   videos: ['#f87171', '#dc2626'],
@@ -45,8 +47,11 @@ export async function searchAll(text, limit = 6) {
   };
 }
 
-export function webSearch(text) {
-  window.open(`https://duckduckgo.com/?q=${encodeURIComponent(text)}`, '_blank', 'noopener');
+/** Opens a website or web search: through the proxy when the server has it, else a normal tab. */
+export async function webSearch(text, ctx) {
+  const url = toUrl(text);
+  if (ctx && (await proxyAvailable())) ctx.open('web', { url });
+  else window.open(url, '_blank', 'noopener');
 }
 
 export function openGame(g, ctx) {

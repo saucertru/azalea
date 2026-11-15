@@ -1,23 +1,22 @@
 {
   "name": "azelela",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "Azelela - games, music, videos, books, chat and more",
-  "type": "module",
-  "main": "index.js",
+  "description": "Azelela - games, music, videos, books, chat, web and more",
   "scripts": {
-    "start": "node index.js",
-    "build": "node scripts/build-manifest.js",
-    "dev": "node scripts/serve.js"
+    "start": "node server/index.mjs",
+    "build": "node scripts/build-manifest.cjs",
+    "dev": "node scripts/serve.cjs"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "@mercuryworkshop/bare-mux": "^2.1.9",
-    "@mercuryworkshop/epoxy-transport": "^3.0.2",
-    "@mercuryworkshop/scramjet": "^1.1.0",
-    "@mercuryworkshop/wisp-js": "^0.5.3",
-    "express": "^5.3.0"
+    "@fastify/static": "^9.0.0",
+    "@mercuryworkshop/bare-mux": "2.1.9",
+    "@mercuryworkshop/libcurl-transport": "^1.5.2",
+    "@mercuryworkshop/scramjet": "1.1.0",
+    "@mercuryworkshop/wisp-js": "^0.4.1",
+    "fastify": "^5.7.4"
   }
 }
