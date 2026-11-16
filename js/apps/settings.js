@@ -1,7 +1,7 @@
 import { h, icon, toast, pickFile, resizeImage, blobToDataUrl, confirmBox } from '../ui.js';
 import { settings, saveSettings, on, DEFAULTS } from '../store.js';
 import { THEMES, FONTS } from '../themes.js';
-import { session, signOut } from '../auth.js';
+import { session, leaveGuest, signOut } from '../auth.js';
 
 const ACCENTS = ['#7c8cff', '#22d3ee', '#4ade80', '#facc15', '#fb923c', '#f43f5e', '#ec4899', '#c084fc', '#14b8a6', '#e4e4e7'];
 
@@ -80,12 +80,14 @@ export default {
                 saveSettings({ theme, accent, font, background, bgDim });
               }
             } }, 'Reset appearance'),
-            h('button', { class: 'btn danger', onClick: async () => {
+            (session.guest
+            ? h('button', { class: 'btn primary', onClick: leaveGuest }, h('span', { html: icon('user', 16) }), 'Log in or sign up')
+            : h('button', { class: 'btn danger', onClick: async () => {
               if (await confirmBox(session.offline ? 'Reset profile?' : 'Log out?', session.offline ? 'Your local profile will be removed.' : 'You can log back in any time.', session.offline ? 'Reset' : 'Log out', true)) {
                 if (session.offline) localStorage.removeItem('azelela.localProfile');
                 signOut();
               }
-            } }, h('span', { html: icon('logout', 16) }), session.offline ? 'Reset profile' : 'Log out')))));
+            } }, h('span', { html: icon('logout', 16) }), session.offline ? 'Reset profile' : 'Log out'))))));
     }
     // redraw on changes, but not while the dim slider is being dragged
     const sig = () => JSON.stringify({ ...settings, bgDim: 0 });

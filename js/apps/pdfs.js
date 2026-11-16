@@ -1,7 +1,7 @@
 import { h, icon, empty, spinner, debounce, toast, formatBytes, timeAgo, pickFile, confirmBox } from '../ui.js';
 import { getManifest } from '../data.js';
 import { sb } from '../supabase.js';
-import { session } from '../auth.js';
+import { session, promptAccount } from '../auth.js';
 
 const MAX = 25 * 1024 * 1024;
 
@@ -71,6 +71,7 @@ export default {
 
     async function upload() {
       if (session.offline || !sb) { toast('Uploads need Supabase set up in js/config.js', 'error'); return; }
+      if (session.guest) { promptAccount('Uploading PDFs'); return; }
       const file = await pickFile('application/pdf');
       if (!file) return;
       if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) { toast('That isn’t a PDF', 'error'); return; }

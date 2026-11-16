@@ -2,7 +2,7 @@ import { CONFIG } from './config.js';
 import { h, $, icon, toast, avatarEl, esc } from './ui.js';
 import { settings, saveSettings, on } from './store.js';
 import { applyTheme, THEMES } from './themes.js';
-import { session, initAuth, signUp, signIn, signOut, validUsername, usernameAvailable } from './auth.js';
+import { session, initAuth, signUp, signIn, signOut, validUsername, usernameAvailable, continueAsGuest } from './auth.js';
 import { configured, sb } from './supabase.js';
 import { APPS, APP_ORDER } from './apps/index.js';
 import { mountMini } from './apps/music.js';
@@ -125,7 +125,7 @@ function showOnboarding(startStep) {
       return h('div', { class: 'ob-card' }, dots(), h('h1', {}, 'Welcome back'), tabs,
         h('label', { class: 'field' }, h('span', {}, 'Email'), email),
         h('label', { class: 'field' }, h('span', {}, 'Password'), pass),
-        err, go, forgot);
+        err, go, forgot, guestBtn());
     }
 
     const user = h('input', { class: 'input', placeholder: 'Pick a username', maxlength: 20, autocomplete: 'username' });
@@ -173,7 +173,14 @@ function showOnboarding(startStep) {
       h('label', { class: 'field' }, h('span', {}, 'Username'), user, hint),
       h('label', { class: 'field' }, h('span', {}, 'Email'), email),
       h('label', { class: 'field' }, h('span', {}, 'Password'), pass),
-      err, go);
+      err, go, guestBtn());
+  }
+
+  function guestBtn() {
+    return h('div', { class: 'ob-guest' },
+      h('span', { class: 'ob-or' }, 'or'),
+      h('button', { class: 'btn block', onClick: () => { continueAsGuest(); afterAccount(); } }, 'Continue as guest'),
+      h('div', { class: 'hint center' }, 'No account needed. Chat and PDF uploads need an account, and you can make one any time.'));
   }
 
   function themeStep() {
@@ -710,10 +717,10 @@ function buildDesktop() {
   const renderStart = () => {
     const p = session.profile;
     startMenu.replaceChildren(
-      h('div', { class: 'sm-user' }, avatarEl(p, 40), h('div', {}, h('b', {}, p?.username || 'Guest'), h('div', { class: 'muted small' }, session.offline ? 'Setup mode' : 'Signed in'))),
+      h('div', { class: 'sm-user' }, avatarEl(p, 40), h('div', {}, h('b', {}, p?.username || 'Guest'), h('div', { class: 'muted small' }, session.offline ? 'Setup mode' : session.guest ? 'Guest' : 'Signed in'))),
       h('div', { class: 'sm-apps' }, APP_ORDER.map((id) =>
         h('button', { class: 'sm-app', onClick: () => { toggleStart(false); ctx.open(id); } }, appTile(id, 30), APPS[id].name))),
-      h('button', { class: 'sm-logout', onClick: () => signOut() }, h('span', { html: icon('logout', 16) }), session.offline ? 'Reset profile' : 'Log out'));
+      h('button', { class: 'sm-logout', onClick: () => signOut() }, h('span', { html: icon('logout', 16) }), session.offline ? 'Reset profile' : session.guest ? 'Log in or sign up' : 'Log out'));
   };
   renderStart();
   const startBtn = h('button', { class: 'start-btn', title: 'Start', 'aria-label': 'Start', onClick: (e) => { e.stopPropagation(); toggleStart(); } },

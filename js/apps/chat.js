@@ -1,7 +1,7 @@
 // Chat: public rooms, private rooms (join with a code) and game sharing.
 import { h, icon, toast, empty, spinner, modal, avatarEl, timeAgo, debounce, confirmBox } from '../ui.js';
 import { sb } from '../supabase.js';
-import { session, getProfile, cacheProfile } from '../auth.js';
+import { session, getProfile, cacheProfile, leaveGuest } from '../auth.js';
 import { getManifest } from '../data.js';
 import { gameCover } from './games.js';
 import { showProfileModal } from './profile.js';
@@ -29,6 +29,13 @@ export default {
   mount(el, params, ctx) {
     if (!sb || session.offline) {
       el.append(empty('Chat needs Supabase', 'Add your Supabase URL and anon key in js/config.js and run supabase/schema.sql to turn on chatrooms.'));
+      return;
+    }
+    if (session.guest) {
+      el.append(h('div', { class: 'empty' },
+        h('div', { class: 'empty-title' }, 'Chat needs an account'),
+        h('p', { class: 'muted small' }, 'Make a free account to join public rooms, make private rooms and share games.'),
+        h('button', { class: 'btn primary', onClick: leaveGuest }, 'Log in or sign up')));
       return;
     }
 

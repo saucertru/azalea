@@ -1,5 +1,5 @@
 import { h, icon, toast, formatDate, avatarEl, modal, pickFile, confirmBox } from '../ui.js';
-import { session, updateProfile, uploadProfileImage, signOut, validUsername } from '../auth.js';
+import { session, leaveGuest, updateProfile, uploadProfileImage, signOut, validUsername } from '../auth.js';
 import { on } from '../store.js';
 
 function bannerEl(p) {
@@ -53,6 +53,9 @@ export default {
       } }, 'Save');
 
       el.replaceChildren(h('div', { class: 'pf-page' },
+        session.guest ? h('div', { class: 'guest-note' },
+          h('p', {}, h('b', {}, 'Guest profile. '), 'Saved in this browser only.'),
+          h('button', { class: 'btn primary sm', onClick: leaveGuest }, 'Make an account')) : null,
         h('div', { class: 'pf-card big' },
           banner,
           h('div', { class: 'pf-head' }, av,
@@ -70,12 +73,15 @@ export default {
         h('div', { class: 'panel' },
           h('h3', {}, 'Account'),
           session.offline ? h('p', { class: 'muted small' }, 'Setup mode: this profile is saved in this browser only. Add Supabase keys in js/config.js for real accounts.') : null,
-          h('button', { class: 'btn danger', onClick: async () => {
+          session.guest ? h('p', { class: 'muted small' }, 'You’re a guest. Your profile and settings are saved in this browser only. Make an account to chat, upload PDFs and keep your settings on every device.') : null,
+          (session.guest
+            ? h('button', { class: 'btn primary', onClick: leaveGuest }, h('span', { html: icon('user', 16) }), 'Log in or sign up')
+            : h('button', { class: 'btn danger', onClick: async () => {
             if (await confirmBox(session.offline ? 'Reset profile?' : 'Log out?', session.offline ? 'Your local profile will be removed from this browser.' : 'You can log back in any time.', session.offline ? 'Reset' : 'Log out', true)) {
               if (session.offline) localStorage.removeItem('azelela.localProfile');
               signOut();
             }
-          } }, h('span', { html: icon('logout', 16) }), session.offline ? 'Reset profile' : 'Log out'))));
+          } }, h('span', { html: icon('logout', 16) }), session.offline ? 'Reset profile' : 'Log out')))));
     }
 
     async function change(kind) {

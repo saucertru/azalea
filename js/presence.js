@@ -8,13 +8,15 @@ let channel = null;
 
 export function startPresence() {
   if (channel || !sb || session.offline || !session.user) return;
-  channel = sb.channel('online-users', { config: { presence: { key: session.user.id } } });
+  // guests see the count but aren't counted (they have no account id)
+  const key = session.guest ? `guest-${Math.random().toString(36).slice(2)}` : session.user.id;
+  channel = sb.channel('online-users', { config: { presence: { key } } });
   channel
     .on('presence', { event: 'sync' }, () => {
       onlineCount = Math.max(1, Object.keys(channel.presenceState()).length);
       emit('online', onlineCount);
     })
     .subscribe(async (status) => {
-      if (status === 'SUBSCRIBED') await channel.track({ at: Date.now() });
+      if (status === 'SUBSCRIBED' && !session.guest) await channel.track({ at: Date.now() });
     });
 }
