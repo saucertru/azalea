@@ -302,7 +302,22 @@ async function buildManifestAsync({ maxLocalSize = Infinity } = {}) {
   };
 }
 
-module.exports = { buildManifest, buildManifestAsync, ROOT };
+/** Web proxy files to serve, by URL folder: /scramjet/, /controller/, /libcurl/ */
+function proxyDirs() {
+  return {
+    scramjet: path.dirname(require.resolve('@mercuryworkshop/scramjet/bundled')),
+    controller: path.dirname(require.resolve('@mercuryworkshop/scramjet-controller')),
+    libcurl: path.dirname(require.resolve('@mercuryworkshop/libcurl-transport')),
+  };
+}
+// only these files are needed in the browser (skips source maps etc.)
+const PROXY_FILES = {
+  scramjet: ['scramjet.js', 'scramjet.wasm'],
+  controller: ['controller.api.js', 'controller.inject.js', 'controller.sw.js'],
+  libcurl: ['index.mjs'],
+};
+
+module.exports = { buildManifest, buildManifestAsync, ROOT, proxyDirs, PROXY_FILES };
 
 if (require.main === module) {
   buildManifestAsync().then(({ manifest: m, report }) => {

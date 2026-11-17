@@ -5,7 +5,8 @@ Choose a browser-style or desktop-style layout, 10 themes, and your own accent c
 
 - **Browser look:** tabs, an address bar (`azelela://games`), back, forward and reload, an icon rail, and a music pill.
   Alt+T opens a new tab and Alt+W closes it. Type an app name, a website (`example.com`) or a search into the address bar.
-  Websites open in the tab through the built-in **Scramjet web proxy**.
+  Websites open in the tab through the built-in **Scramjet web proxy**, and you can add **Chrome extensions**
+  (ad blockers, userscripts and so on) with the puzzle button in the Web app.
 - **Desktop look:** coloured app icons, a big clock, local weather (Open-Meteo, after you allow location) and live system stats,
   plus a floating dock with search, pinned apps and open windows.
 
@@ -99,6 +100,26 @@ Pushing to GitHub redeploys automatically.
 The build log shows how many files came from R2, and warns if R2 couldn't be read.
 It also lists any file in the repo over 25 MiB that Pages can't host, so you know to move it to R2.
 
+## Chrome extensions (in the Web app)
+
+Open a website in the Web app and click the **puzzle button** to open **Extensions**. Then either:
+- paste a **Chrome Web Store link** (or the 32-letter extension id) and click **Install**. The Render server downloads it from Google (`/api/crx/<id>`), or
+- install a **.zip or .crx** file.
+
+Extensions run on websites opened through the Web app. Their buttons and popups appear in the small bar above the page.
+They're saved in each person's browser, can be turned off or removed, and options pages open in a new tab.
+
+Not every extension works. Sapphire copies most of Chrome's extension features, but some (for example
+blocking requests at the network level outside the page) can't fully work inside a website.
+
+**Updating Sapphire:** the bundle in `js/vendor/` is committed, so deploys don't need to build it. To update it, run:
+```bash
+npm install --no-save --legacy-peer-deps @x8r/sapphire@<version> jszip@3.10.1 esbuild@0.28.0
+node scripts/build-vendor.mjs
+```
+Sapphire, Scramjet and `scramjet-controller` versions must match each other.
+`scramjet-controller` 0.0.14 checks it's running with Scramjet `2.0.67-alpha.2`.
+
 ## Adding content (the auto-detect folders)
 
 | Drop files here | What happens |
@@ -150,7 +171,8 @@ Until the keys are added, the site runs in **setup mode**. Your profile is saved
 | Books | Open Library search plus the Internet Archive reader. Only public-domain books are shown. |
 | TV | Official YouTube live streams from public broadcasters |
 | Accounts, chat, uploads | Supabase. The library is bundled in `js/vendor/`, so it still works when CDNs are blocked. |
-| Web proxy | Scramjet 1.1, bare-mux and the libcurl transport, with a Wisp server (`@mercuryworkshop/wisp-js`) on the Node server |
+| Web proxy | Scramjet 2.0 (alpha) with `scramjet-controller` and the libcurl transport, connecting to a Wisp server (`@mercuryworkshop/wisp-js`) on the Node server |
+| Chrome extensions | [Sapphire](https://github.com/x8rr/sapphire) (emulates the `chrome.*` APIs inside proxied pages), bundled into `js/vendor/` |
 
 ## Project layout
 
@@ -165,8 +187,11 @@ js/presence.js      "users online" count (Supabase Realtime presence)
 js/apps/*.js        one file per app (games, music, videos, pdfs, books, tv, ai, chat, profile, settings, home)
 js/config.js        your settings
 js/themes.js        the 10 themes + fonts
-js/proxy.js         Scramjet web proxy setup (lazy: only loads when you open a website)
-sw.js               proxy service worker
+js/proxy.js         web proxy setup: Scramjet 2, Wisp transport, Sapphire, tab tracking (loads only when needed)
+js/extensions.js    extensions UI: toolbar buttons, manager, popups, menus, notifications
+js/vendor/          bundled libraries: supabase.js, sapphire.js, sapphire-sw.js
+sw.js               service worker for the proxy and extensions
+scripts/build-vendor.mjs  re-bundles Sapphire (only when updating it)
 server/index.mjs    Node server for Render: site + proxy + Wisp
 render.yaml         Render Blueprint
 scripts/            manifest builder (local + R2), Pages build (build-static.cjs), dev server

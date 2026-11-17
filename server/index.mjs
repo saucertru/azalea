@@ -7,12 +7,10 @@ import { createRequire } from 'node:module';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { server as wisp, logging } from '@mercuryworkshop/wisp-js/server';
-import { scramjetPath } from '@mercuryworkshop/scramjet/path';
-import { libcurlPath } from '@mercuryworkshop/libcurl-transport';
-import { baremuxPath } from '@mercuryworkshop/bare-mux/node';
+import { dirname } from 'node:path';
 
 const require = createRequire(import.meta.url);
-const { buildManifestAsync } = require('../scripts/build-manifest.cjs');
+const { buildManifestAsync, proxyDirs } = require('../scripts/build-manifest.cjs');
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 // ---- Wisp (the part that actually fetches websites)
@@ -56,10 +54,28 @@ fastify.get('/health', (req, reply) => {
   reply.header('Access-Control-Allow-Origin', '*').header('Cache-Control', 'no-store').send('ok');
 });
 
-// proxy files
-fastify.register(fastifyStatic, { root: scramjetPath, prefix: '/scram/', decorateReply: false });
-fastify.register(fastifyStatic, { root: libcurlPath, prefix: '/libcurl/', decorateReply: false });
-fastify.register(fastifyStatic, { root: baremuxPath, prefix: '/baremux/', decorateReply: false });
+// web proxy files (Scramjet 2, its controller, the libcurl transport)
+for (const [name, dir] of Object.entries(proxyDirs())) {
+  fastify.register(fastifyStatic, { root: dir, prefix: `/${name}/`, decorateReply: false });
+}
+
+// Install Chrome extensions from a Web Store link: downloads the .crx from
+// Google for the browser (Google doesn't allow that cross-origin directly).
+fastify.get('/api/crx/:id', async (req, reply) => {
+  reply.header('Access-Control-Allow-Origin', '*');
+  const { id } = req.params;
+  if (!/^[a-p]{32}$/.test(id)) return reply.code(400).send('Not a Chrome Web Store extension id');
+  const url = `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=138.0&acceptformat=crx2,crx3&x=id%3D${id}%26uc`;
+  try {
+    const r = await fetch(url, { redirect: 'follow' });
+    if (!r.ok) return reply.code(r.status).send('Download failed');
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > 50 * 1024 * 1024) return reply.code(413).send('Extension too big');
+    return reply.type('application/x-chrome-extension').send(buf);
+  } catch {
+    return reply.code(502).send('Could not reach the Chrome Web Store');
+  }
+});
 
 // the site itself (but never server code, packages or hidden files)
 const PRIVATE = /^\/(node_modules|server|scripts|supabase)(\/|$)|\/\.|^\/package(-lock)?\.json$|^\/render\.yaml$/;

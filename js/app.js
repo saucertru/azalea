@@ -1,6 +1,6 @@
 import { CONFIG } from './config.js';
 import { h, $, icon, toast, avatarEl, esc } from './ui.js';
-import { settings, saveSettings, on } from './store.js';
+import { settings, saveSettings, on, emit } from './store.js';
 import { applyTheme, THEMES } from './themes.js';
 import { session, initAuth, signUp, signIn, signOut, validUsername, usernameAvailable, continueAsGuest } from './auth.js';
 import { configured, sb } from './supabase.js';
@@ -8,7 +8,7 @@ import { APPS, APP_ORDER } from './apps/index.js';
 import { mountMini } from './apps/music.js';
 import { APP_COLORS, appTile, findApp, searchAll, webSearch, openGame, LOGO_SVG } from './appmeta.js';
 import { startPresence } from './presence.js';
-import { looksLikeUrl, wakeWisp } from './proxy.js';
+import { looksLikeUrl, wakeWisp, setOpener } from './proxy.js';
 import { mountClock, mountWeather, mountSystem } from './widgets.js';
 
 const appRoot = $('#app');
@@ -249,6 +249,8 @@ function friendlyError(e, fallback) {
 // =====================================================================
 let shell = null; // { layout, cleanup() }
 let browserNav = null; // set by the browser layout
+let browserNewTab = null;
+let viewControls = null; // { close(view), activate(view) } from the current layout
 
 const ctx = {
   get layout() { return settings.layout; },
@@ -258,6 +260,15 @@ const ctx = {
     else if (browserNav) browserNav(appId, params);
     else location.hash = `#/${appId}${toQuery(params)}`;
   },
+  /** Opens an app in a NEW tab (browser) or a new window (desktop). */
+  openNew(appId, params = {}) {
+    if (!APPS[appId]) return;
+    if (settings.layout === 'desktop') wm.openExtra(appId, params);
+    else if (browserNewTab) browserNewTab(appId, params);
+  },
+  /** Close / bring forward the tab or window that shows `view`. */
+  closeView(view) { viewControls?.close(view); },
+  activateView(view) { viewControls?.activate(view); },
   /** Desktop: opens a URL in its own window and returns true. Browser: returns false. */
   openFrame(title, url, opts = {}) {
     if (settings.layout !== 'desktop') return false;
@@ -295,6 +306,8 @@ function startShell() {
   document.body.classList.toggle('layout-desktop', settings.layout === 'desktop');
   shell = settings.layout === 'desktop' ? buildDesktop() : buildBrowser();
   startPresence();
+  // extensions' chrome.tabs.create opens a new Web tab/window
+  setOpener((url, { active, token }) => ctx.openNew('web', { url, _t: token, ...(active ? {} : { _bg: '1' }) }));
 }
 
 let lastLayout = settings.layout;
@@ -410,6 +423,7 @@ function buildBrowser() {
   }
 
   function activate(tab) {
+    const changed = active !== tab;
     active = tab;
     for (const t of tabs) {
       t.pane.hidden = t !== tab;
@@ -417,6 +431,7 @@ function buildBrowser() {
     }
     tab.el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
     if (tab.appId) updateChrome();
+    if (changed) emit('view-activated', tab.view);
   }
 
   function closeTab(tab) {
@@ -444,6 +459,16 @@ function buildBrowser() {
     navigate(active, appId, params, true);
   }
   browserNav = nav;
+  browserNewTab = (appId, params) => {
+    const prev = active;
+    const { _bg, ...rest } = params;
+    newTab(appId, rest);
+    if (_bg && prev) activate(prev);
+  };
+  viewControls = {
+    close: (view) => { const t = tabs.find((x) => x.view === view); if (t) closeTab(t); },
+    activate: (view) => { const t = tabs.find((x) => x.view === view); if (t && t !== active) activate(t); },
+  };
 
   // ---- address bar
   address.addEventListener('focus', () => address.select());
@@ -490,6 +515,8 @@ function buildBrowser() {
     layout: 'browser',
     cleanup() {
       browserNav = null;
+      browserNewTab = null;
+      viewControls = null;
       ctx.webNavigated = null;
       window.removeEventListener('hashchange', onHash);
       document.removeEventListener('keydown', onKey);
@@ -516,7 +543,7 @@ const wm = {
     if (existing) {
       if (Object.keys(params).length) {
         existing.cleanup();
-        existing.cleanup = mountApp(appId, existing.body, params);
+        existing.cleanup = mountApp(appId, existing.view, params);
       }
       this.show(existing);
       return;
@@ -524,11 +551,23 @@ const wm = {
     this.create({ key: appId, title: app.name, iconName: app.icon, mount: (body) => mountApp(appId, body, params) });
   },
 
+  extraSeq: 0,
+  /** Another window for an app that already has one (e.g. a 2nd Web window). */
+  openExtra(appId, params = {}) {
+    const app = APPS[appId];
+    const { _bg, ...rest } = params;
+    const key = `${appId}-${++this.extraSeq}`;
+    const prev = this.top;
+    this.create({ key, title: app.name, iconName: app.icon, mount: (body) => mountApp(appId, body, rest) });
+    if (_bg && prev) this.focus(prev);
+  },
+
   frame(title, url, { iconName = 'games', width, height } = {}) {
     const key = `frame-${Date.now()}`;
     this.create({
       key, title, iconName, width, height,
-      mount: (body) => {
+      mount: (view, body) => {
+        view.remove();
         body.className = 'win-body frame-body';
         body.append(h('iframe', { src: url, allow: 'autoplay; fullscreen; gamepad; clipboard-write', allowfullscreen: true, title }));
         return () => {};
@@ -543,7 +582,9 @@ const wm = {
     const left = Math.max(10, Math.round((vw - w) / 2 - 80 + off));
     const top = Math.max(10, Math.round((vh - hgt) / 2 - 60 + off));
 
-    const body = h('div', { class: 'win-body' });
+    // the app mounts into `view`; `body` keeps the window's own layout styles
+    const view = h('div', { class: 'app-view' });
+    const body = h('div', { class: 'win-body' }, view);
     const head = h('div', { class: 'win-head' },
       h('span', { class: 'win-icon', html: icon(iconName, 16) }),
       h('span', { class: 'win-title' }, title),
@@ -553,12 +594,12 @@ const wm = {
         h('button', { class: 'close', 'aria-label': 'Close', html: icon('close', 14), onClick: () => this.close(win) })));
     const el = h('div', { class: 'win', style: { left: `${left}px`, top: `${top}px`, width: `${w}px`, height: `${hgt}px` } }, head, body);
     const pinned = this.pinned.get(key);
-    const colorKey = APP_COLORS[key] ? key : ({ games: 'games', pdf: 'pdfs', book: 'books', tv: 'tv' }[iconName] || 'games');
+    const colorKey = APP_COLORS[key] ? key : ({ games: 'games', pdf: 'pdfs', book: 'books', tv: 'tv', globe: 'web' }[iconName] || 'games');
     const [c1, c2] = APP_COLORS[colorKey];
     const task = pinned || h('button', { class: 'dock-app', title, 'aria-label': title, onClick: () => (win.min || this.top !== win ? this.show(win) : this.minimise(win)) },
       h('span', { class: 'app-tile', style: { width: '34px', height: '34px', borderRadius: '10px', background: `linear-gradient(160deg, ${c1}, ${c2})` }, html: icon(iconName, 17) }));
     task.classList.add('running');
-    const win = { key, el, body, task, pinned: Boolean(pinned), min: false, max: false, cleanup: () => {} };
+    const win = { key, el, body, view, task, pinned: Boolean(pinned), min: false, max: false, cleanup: () => {} };
     this.wins.set(key, win);
     this.layer.append(el);
     if (!pinned) this.bar.append(task);
@@ -567,7 +608,7 @@ const wm = {
     this.makeDraggable(win, head);
     if (vw < 700) this.toggleMax(win);
     this.focus(win);
-    win.cleanup = mount(body) || (() => {});
+    win.cleanup = mount(view, body) || (() => {});
     return win;
   },
 
@@ -610,6 +651,7 @@ const wm = {
       w.el.classList.toggle('focused', w === win);
       w.task.classList.toggle('active', w === win);
     }
+    emit('view-activated', win.view);
   },
   show(win) {
     win.min = false;
@@ -733,6 +775,10 @@ function buildDesktop() {
 
   wm.layer = layer;
   wm.bar = tasks;
+  viewControls = {
+    close: (view) => { for (const w of wm.wins.values()) if (w.view === view) return wm.close(w); },
+    activate: (view) => { for (const w of wm.wins.values()) if (w.view === view) return wm.show(w); },
+  };
   const closeStart = (e) => {
     if (!startMenu.contains(e.target)) toggleStart(false);
     if (!search.contains(e.target)) closeResults();
@@ -762,6 +808,7 @@ function buildDesktop() {
   return {
     layout: 'desktop',
     cleanup() {
+      viewControls = null;
       wm.closeAll();
       document.removeEventListener('pointerdown', closeStart);
       window.removeEventListener('blur', blurStart);
