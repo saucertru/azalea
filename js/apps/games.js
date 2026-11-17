@@ -15,11 +15,11 @@ export function gameUrl(g) {
 
 export function gameCover(g, cls = 'game-cover') {
   if (g.cover) return h('img', { class: cls, src: g.cover, alt: '', loading: 'lazy' });
-  // generated cover from the title
+  // plain coloured cover from the title
   let hash = 0;
   for (const c of g.title) hash = (hash * 31 + c.charCodeAt(0)) | 0;
   const hue = Math.abs(hash) % 360;
-  return h('div', { class: `${cls} gen`, style: { background: `linear-gradient(135deg, hsl(${hue} 70% 45%), hsl(${(hue + 50) % 360} 70% 30%))` } },
+  return h('div', { class: `${cls} gen`, style: { background: `hsl(${hue} 45% 38%)` } },
     h('span', {}, g.title.slice(0, 2).toUpperCase()));
 }
 

@@ -6,7 +6,7 @@ import { session, initAuth, signUp, signIn, signOut, validUsername, usernameAvai
 import { configured, sb } from './supabase.js';
 import { APPS, APP_ORDER } from './apps/index.js';
 import { mountMini } from './apps/music.js';
-import { APP_COLORS, appTile, findApp, searchAll, webSearch, openGame, LOGO_SVG } from './appmeta.js';
+import { APP_COLORS, appTile, findApp, searchAll, webSearch, openGame } from './appmeta.js';
 import { startPresence } from './presence.js';
 import { looksLikeUrl, wakeWisp, setOpener } from './proxy.js';
 import { mountClock, mountWeather, mountSystem } from './widgets.js';
@@ -595,9 +595,9 @@ const wm = {
     const el = h('div', { class: 'win', style: { left: `${left}px`, top: `${top}px`, width: `${w}px`, height: `${hgt}px` } }, head, body);
     const pinned = this.pinned.get(key);
     const colorKey = APP_COLORS[key] ? key : ({ games: 'games', pdf: 'pdfs', book: 'books', tv: 'tv', globe: 'web' }[iconName] || 'games');
-    const [c1, c2] = APP_COLORS[colorKey];
+    const [, c2] = APP_COLORS[colorKey];
     const task = pinned || h('button', { class: 'dock-app', title, 'aria-label': title, onClick: () => (win.min || this.top !== win ? this.show(win) : this.minimise(win)) },
-      h('span', { class: 'app-tile', style: { width: '34px', height: '34px', borderRadius: '10px', background: `linear-gradient(160deg, ${c1}, ${c2})` }, html: icon(iconName, 17) }));
+      h('span', { class: 'app-tile', style: { width: '34px', height: '34px', borderRadius: '8px', background: c2 }, html: icon(iconName, 17) }));
     task.classList.add('running');
     const win = { key, el, body, view, task, pinned: Boolean(pinned), min: false, max: false, cleanup: () => {} };
     this.wins.set(key, win);
@@ -692,7 +692,6 @@ function buildDesktop() {
   const icons = h('div', { class: 'desk-icons' }, DESK_APPS.map((id) =>
     h('button', { class: 'desk-icon', onClick: () => ctx.open(id), title: APPS[id].name },
       appTile(id, 50), h('span', { class: 'di-label' }, APPS[id].name))));
-  const logo = h('div', { class: 'desk-logo', html: LOGO_SVG });
 
   // right-hand widgets
   const bigTime = h('div', { class: 'w-time' });
@@ -770,7 +769,7 @@ function buildDesktop() {
 
   const dock = h('div', { class: 'dock' }, startBtn, search, pinnedWrap, tasks, miniEl,
     h('div', { class: 'dock-clock' }, dockTime, dockDate));
-  const root = h('div', { class: 'shell desktop' }, logo, icons, widgets, layer, startMenu, dock);
+  const root = h('div', { class: 'shell desktop' }, icons, widgets, layer, startMenu, dock);
   appRoot.replaceChildren(root);
 
   wm.layer = layer;
