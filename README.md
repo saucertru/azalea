@@ -137,7 +137,6 @@ Until the keys are added, the site runs in **setup mode**. Your profile is saved
 - `mediaUrl`: your R2 bucket's public address, for files over 25 MB.
 - `youtubeApiKey`: a free YouTube Data API v3 key turns on YouTube search in Music. Without one, you can still paste YouTube links.
 - `liveChannels`: the official broadcaster live streams shown in TV. Each channel is a YouTube channel ID.
-- `archiveCollections`: the public-domain Internet Archive collections shown in TV.
 
 ## What powers each part
 
@@ -149,7 +148,7 @@ Until the keys are added, the site runs in **setup mode**. Your profile is saved
 | Lyrics | LRCLIB (free, no key) |
 | AI | Puter.js. Free, no key. Each user signs in to a free Puter account on their first message. |
 | Books | Open Library search plus the Internet Archive reader. Only public-domain books are shown. |
-| TV | Official YouTube live streams from public broadcasters, plus public-domain Internet Archive shows and films |
+| TV | Official YouTube live streams from public broadcasters |
 | Accounts, chat, uploads | Supabase. The library is bundled in `js/vendor/`, so it still works when CDNs are blocked. |
 | Web proxy | Scramjet 1.1, bare-mux and the libcurl transport, with a Wisp server (`@mercuryworkshop/wisp-js`) on the Node server |
 

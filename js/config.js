@@ -34,11 +34,4 @@ export const CONFIG = {
     { name: 'Sky News', channel: 'UCoMdktPbSTixAyNGwb-UYkQ' },
     { name: 'NASA', channel: 'UCLA_DiR1FfKNvjuUpBHmylQ' },
   ],
-
-  // Public-domain TV and films from the Internet Archive
-  archiveCollections: [
-    { id: 'classic_tv', name: 'Classic TV' },
-    { id: 'feature_films', name: 'Public domain films' },
-    { id: 'classic_cartoons', name: 'Classic cartoons' },
-  ],
 };
