@@ -1,5 +1,7 @@
 // Settings saved in the browser and (when logged in) synced to the profile.
 
+// Storage keys keep the site's original spelling ("azelela") so people's
+// saved settings and profiles survive the rename to Azalea.
 const KEY = 'azelela.settings';
 
 export const DEFAULTS = {

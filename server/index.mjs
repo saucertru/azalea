@@ -1,4 +1,4 @@
-// Azelela server for Render (or any Node host).
+// Azalea server for Render (or any Node host).
 // Serves the site, the Scramjet web proxy files, and a Wisp server at /wisp/.
 //   npm start   ->  http://localhost:8080 (or $PORT)
 import { createServer } from 'node:http';
@@ -93,5 +93,5 @@ process.on('SIGTERM', shutdown);
 
 const port = Number.parseInt(process.env.PORT || '', 10) || 8080;
 fastify.listen({ port, host: '0.0.0.0' }).then(() => {
-  console.log(`Azelela running on http://localhost:${port}`);
+  console.log(`Azalea running on http://localhost:${port}`);
 });

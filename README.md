@@ -1,9 +1,9 @@
-# Azelela
+# Azalea
 
 Games, music, videos, PDFs, books, TV, a free AI and chat, in one website.
 Choose a browser-style or desktop-style layout, 10 themes, and your own accent colour, font and background.
 
-- **Browser look:** tabs, an address bar (`azelela://games`), back, forward and reload, an icon rail, and a music pill.
+- **Browser look:** tabs, an address bar (`azalea://games`), back, forward and reload, an icon rail, and a music pill.
   Alt+T opens a new tab and Alt+W closes it. Type an app name, a website (`example.com`) or a search into the address bar.
   Websites open in the tab through the built-in **Scramjet web proxy**, and you can add **Chrome extensions**
   (ad blockers, userscripts and so on) with the puzzle button in the Web app.

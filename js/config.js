@@ -1,8 +1,8 @@
 // =====================================================================
-// Azelela settings - edit these, then redeploy.
+// Azalea settings - edit these, then redeploy.
 // =====================================================================
 export const CONFIG = {
-  siteName: 'Azelela',
+  siteName: 'Azalea',
 
   // Supabase -> Project Settings -> API. The anon key is safe to put here
   // (Row Level Security in supabase/schema.sql protects the data).

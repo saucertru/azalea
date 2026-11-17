@@ -244,7 +244,7 @@ export async function registerTab(iframe, hooks = {}) {
 function navErrorPlugin(onError) {
   const { ManagedPlugin } = window.$scramjetController;
   class NavErrorPlugin extends ManagedPlugin {
-    constructor() { super('azelela-nav-errors', []); }
+    constructor() { super('azalea-nav-errors', []); }
     install(frame) {
       super.install(frame);
       this.tap(frame.hooks.error.request, (data) => {
