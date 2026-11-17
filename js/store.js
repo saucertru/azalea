@@ -11,6 +11,7 @@ export const DEFAULTS = {
   background: null,   // image URL or data URL
   bgDim: 0.45,
   layout: 'browser',  // 'browser' | 'desktop'
+  xmas: true,         // Christmas decorations (lights + snow)
   onboarded: false,
 };
 

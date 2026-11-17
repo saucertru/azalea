@@ -1,3 +1,4 @@
+import { decorate } from './xmas.js';
 import { CONFIG } from './config.js';
 import { h, $, icon, toast, avatarEl, esc } from './ui.js';
 import { settings, saveSettings, on, emit } from './store.js';
@@ -229,7 +230,10 @@ function showOnboarding(startStep) {
 
   function render() {
     const card = step === 0 ? accountStep() : step === 1 ? themeStep() : layoutStep();
-    root.replaceChildren(h('div', { class: 'ob-brand' }, h('img', { class: 'brand-icon', src: 'assets/icon.png', alt: '' }), CONFIG.siteName), card);
+    const win = h('div', { class: `ob-window${step === 0 ? '' : ' wide'}`, role: 'dialog', 'aria-label': `Welcome to ${CONFIG.siteName}` },
+      h('div', { class: 'ob-brand' }, h('img', { class: 'brand-icon', src: 'assets/icon.png', alt: '' }), CONFIG.siteName), card);
+    root.replaceChildren(win);
+    decorate(root);
     card.querySelector('input')?.focus();
   }
   render();
@@ -771,6 +775,7 @@ function buildDesktop() {
     h('div', { class: 'dock-clock' }, dockTime, dockDate));
   const root = h('div', { class: 'shell desktop' }, icons, widgets, layer, startMenu, dock);
   appRoot.replaceChildren(root);
+  decorate(root, { snow: 44 });
 
   wm.layer = layer;
   wm.bar = tasks;
