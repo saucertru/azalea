@@ -1,0 +1,17 @@
+// Cloudflare (Workers) settings for the Azalea website.
+// Cloudflare builds it with `pnpm run build:pages`, which puts the site in
+// dist/, then runs `npx wrangler deploy` with this file.
+{
+  "name": "azalea",
+  "main": "worker/index.mjs",
+  "compatibility_date": "2026-06-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    // only /manifest.json runs the Worker; everything else is plain files
+    "run_worker_first": ["/manifest.json"]
+  },
+  // the R2 bucket with the big files (games, videos, music, PDFs)
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "azelela" }],
+  "observability": { "enabled": true }
+}

@@ -78,7 +78,7 @@ fastify.get('/api/crx/:id', async (req, reply) => {
 });
 
 // the site itself (but never server code, packages or hidden files)
-const PRIVATE = /^\/(node_modules|server|scripts|supabase)(\/|$)|\/\.|^\/package(-lock)?\.json$|^\/render\.yaml$/;
+const PRIVATE = /^\/(node_modules|server|scripts|supabase|worker|dist)(\/|$)|\/\.|^\/(package(-lock)?\.json|pnpm-lock\.yaml|render\.yaml|vercel\.json|wrangler\.jsonc|index\.js)$/;
 fastify.register(fastifyStatic, {
   root: ROOT,
   prefix: '/',

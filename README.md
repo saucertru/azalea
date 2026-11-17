@@ -16,7 +16,7 @@ Choose a browser-style or desktop-style layout, 10 themes, and your own accent c
 npm install
 npm start           # full site + web proxy: http://localhost:8080
 npm run dev         # quick preview without the proxy, no install needed: http://localhost:3000
-npm run build:pages # what Cloudflare Pages runs: builds the site into dist/
+npm run build:pages # what Cloudflare runs: builds the site into dist/
 ```
 
 Both re-scan the content folders every time the page loads, so new files show up when you refresh.
@@ -26,8 +26,8 @@ You need Node.js 18 or newer.
 
 | Part | Where | What it does |
 |---|---|---|
-| Website | **Cloudflare Pages** | The whole site, plus the Scramjet proxy files. It never sleeps, so it always loads instantly. |
-| Large files (over 25 MB) | **Cloudflare R2** | Big ROMs, webports, videos, music and PDFs. Free downloads. |
+| Website | **Cloudflare Workers** (`azalea.blazess-mc.workers.dev`) | The whole site, plus the Scramjet proxy files. It never sleeps, so it always loads instantly. |
+| Large files (over 25 MB) | **Cloudflare R2** (bucket `azelela`) | Big ROMs, webports, videos, music and PDFs. Free downloads. |
 | Wisp server | **Render** | The part of the web proxy that actually fetches websites. |
 
 The site connects to Render using `wispUrl` in `js/config.js`. Free Render servers sleep after 15 minutes.
@@ -47,58 +47,44 @@ The Render address still shows the full site too, which is handy as a backup.
   If sites won't load, add the environment variable `SAFE_DNS=off` in Render to use normal DNS instead.
 - Add sites to block in `hostname_blacklist`.
 
-### 2. R2 (large files)
+### 2. Cloudflare Worker (website)
 
-1. In the Cloudflare dashboard, open **R2 Object Storage** and click **Create bucket**. Name it something like `azalea-media`.
-2. Open the bucket's **Settings** and find **Public Development URL**. Click **Enable**, then copy the `https://pub-….r2.dev` address.
-   Paste it into `js/config.js` as `mediaUrl`, then push.
-3. In the same **Settings** page, find **CORS Policy**, click **Add CORS policy** and paste the policy below.
-   This lets the emulator load ROMs from R2.
-   ```json
-   [
-     {
-       "AllowedOrigins": ["*"],
-       "AllowedMethods": ["GET", "HEAD"],
-       "AllowedHeaders": ["*"],
-       "ExposeHeaders": ["Content-Length", "Content-Range", "Accept-Ranges"],
-       "MaxAgeSeconds": 86400
-     }
-   ]
-   ```
-4. Back on the R2 overview page, click **Manage API tokens**, then **Create API token**:
-   - **Permission:** Object Read only
-   - **Bucket:** apply it to your bucket only
+The Worker `azalea` is connected to this GitHub repo, so every push to `main` redeploys it.
+- **Build command:** `pnpm run build:pages` (puts the site in `dist/`)
+- **Deploy command:** `npx wrangler deploy` (uses `wrangler.jsonc`)
 
-   Copy the **Access Key ID** and **Secret Access Key**. The secret is only shown once. Also note your **Account ID**, shown on the R2 overview page.
-5. **Upload files** using the same folders as the site, for example `games/roms/n64/game.z64`, `games/webports/MyGame/index.html` or `videos/movie.mp4`.
-   A same-name image still works as a cover, and `game.json` still works for titles.
+Only `dist/` is published, so server code and config files stay private.
+`worker/index.mjs` answers `/manifest.json`: it combines the files in this repo with whatever is in the R2 bucket right now.
+The bucket is connected in `wrangler.jsonc`, so no R2 keys are needed, and new uploads show up within about a minute without a redeploy.
 
-The free `r2.dev` address is rate-limited and meant for testing. If you get a domain later, connect it under **Settings**, then **Custom Domains**, and use that as `mediaUrl`.
+### 3. R2 (large files)
 
-### 3. Cloudflare Pages (website)
+- **Upload files** in the dashboard (**R2 Object Storage**, then `azelela`, then **Upload**) using the same folders as the site.
+  For example: `games/roms/n64/game.z64`, `games/webports/MyGame/index.html` or `videos/movie.mp4`.
+  A same-name image still works as a cover, and `game.json` still works for titles.
+- The bucket's public address (`mediaUrl` in `js/config.js`) is its `r2.dev` URL. It's rate-limited and meant for testing.
+  If you get a domain later, connect it under the bucket's **Settings**, then **Custom Domains**, and use that as `mediaUrl`.
+- The bucket's **CORS Policy** (in **Settings**) must allow the site to load files, which the emulator needs:
+  ```json
+  [
+    {
+      "AllowedOrigins": ["*"],
+      "AllowedMethods": ["GET", "HEAD"],
+      "AllowedHeaders": ["*"],
+      "ExposeHeaders": ["Content-Length", "Content-Range", "Accept-Ranges"],
+      "MaxAgeSeconds": 86400
+    }
+  ]
+  ```
 
-1. In the Cloudflare dashboard, go to **Workers & Pages**, click **Create**, then **Pages**, then **Connect to Git**, and pick `saucertru/azalea`.
-2. Fill in the build settings:
-   - **Framework preset:** None
-   - **Build command:** `npm run build:pages`
-   - **Build output directory:** `dist`
-3. Under **Environment variables**, add these. Use **Encrypt** for the two keys.
+The Render copy of the site only lists files in the repo. To make it list R2 too, add `R2_ACCOUNT_ID`, `R2_BUCKET`,
+`R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` (from an R2 API token with **Object Read only**) to Render's environment.
 
-   | Name | Value |
-   |---|---|
-   | `NODE_VERSION` | `22` |
-   | `R2_ACCOUNT_ID` | your Cloudflare account ID |
-   | `R2_BUCKET` | `azalea-media` (your bucket name) |
-   | `R2_ACCESS_KEY_ID` | from step 2.4 |
-   | `R2_SECRET_ACCESS_KEY` | from step 2.4 |
-4. Click **Save and Deploy**. Your site will be at `https://<project>.pages.dev`.
-5. In Supabase, go to **Authentication**, then **URL Configuration**, and set **Site URL** to the new `pages.dev` address.
+### 4. Supabase sign-in links
 
-**After uploading new files to R2**, redeploy Pages so the site lists them: go to **Deployments**, then **Retry deployment**.
-Pushing to GitHub redeploys automatically.
-
-The build log shows how many files came from R2, and warns if R2 couldn't be read.
-It also lists any file in the repo over 25 MiB that Pages can't host, so you know to move it to R2.
+In Supabase, go to **Authentication**, then **URL Configuration**:
+- **Site URL:** `https://azalea.blazess-mc.workers.dev`
+- **Redirect URLs:** `https://azalea.blazess-mc.workers.dev/**` and `https://azalea-3rwy.onrender.com/**`
 
 ## Chrome extensions (in the Web app)
 
