@@ -56,3 +56,33 @@ export function decorate(host, opts) {
   host.prepend(layer);
   return layer;
 }
+
+/**
+ * "37 days until Christmas" from 1 November, "Merry Christmas!" on the
+ * 25th and 26th; empty the rest of the year.
+ */
+export function christmasText(now = new Date()) {
+  const m = now.getMonth(), d = now.getDate();
+  if (m === 11 && (d === 25 || d === 26)) return 'Merry Christmas! 🎄';
+  if (!(m === 10 || (m === 11 && d < 25))) return '';
+  const today = new Date(now.getFullYear(), m, d);
+  const xmas = new Date(now.getFullYear(), 11, 25);
+  const days = Math.round((xmas - today) / 86400000);
+  if (days === 1) return '🎄 Christmas is tomorrow!';
+  return `🎄 ${days} days until Christmas`;
+}
+
+/** A small countdown label that keeps itself up to date. Hidden with the decorations. */
+export function countdownEl(cls = '') {
+  const el = h('div', { class: `xmas-count ${cls}`.trim() });
+  const tick = () => {
+    if (!el.isConnected && el.dataset.started) return clearInterval(t);
+    el.dataset.started = '1';
+    const text = christmasText();
+    el.textContent = text;
+    el.hidden = !text;
+  };
+  const t = setInterval(tick, 60000);
+  tick();
+  return el;
+}

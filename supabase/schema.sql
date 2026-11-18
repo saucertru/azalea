@@ -136,9 +136,11 @@ drop policy if exists "see rooms" on public.rooms;
 create policy "see rooms" on public.rooms
   for select using (is_private = false or public.is_room_member(id));
 
+-- you can see who's in the rooms you're in (needed to show DM names)
 drop policy if exists "see own memberships" on public.room_members;
-create policy "see own memberships" on public.room_members
-  for select using (user_id = auth.uid());
+drop policy if exists "see members of my rooms" on public.room_members;
+create policy "see members of my rooms" on public.room_members
+  for select using (user_id = auth.uid() or public.is_room_member(room_id));
 
 drop policy if exists "leave rooms" on public.room_members;
 create policy "leave rooms" on public.room_members
@@ -269,3 +271,183 @@ create policy "delete own files" on storage.objects
   for delete to authenticated
   using (bucket_id in ('avatars', 'banners', 'pdfs')
          and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- =====================================================================
+-- v1.3: game stats, friends + direct messages, emulator cloud saves
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- GAME STATS (favourites, plays, play time) - public, so profiles can
+-- show "most played"; only you can change yours.
+-- ---------------------------------------------------------------------
+create table if not exists public.game_stats (
+  user_id      uuid not null references public.profiles (id) on delete cascade,
+  game_id      text not null check (char_length(game_id) between 1 and 200),
+  title        text check (char_length(title) <= 200),
+  plays        integer not null default 0 check (plays >= 0),
+  seconds      integer not null default 0 check (seconds >= 0),
+  favourite    boolean not null default false,
+  last_played  timestamptz,
+  primary key (user_id, game_id)
+);
+create index if not exists game_stats_user_seconds on public.game_stats (user_id, seconds desc);
+alter table public.game_stats enable row level security;
+
+drop policy if exists "game stats are public" on public.game_stats;
+create policy "game stats are public" on public.game_stats for select using (true);
+drop policy if exists "add own game stats" on public.game_stats;
+create policy "add own game stats" on public.game_stats
+  for insert to authenticated with check (user_id = auth.uid());
+drop policy if exists "update own game stats" on public.game_stats;
+create policy "update own game stats" on public.game_stats
+  for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+drop policy if exists "delete own game stats" on public.game_stats;
+create policy "delete own game stats" on public.game_stats
+  for delete to authenticated using (user_id = auth.uid());
+
+-- ---------------------------------------------------------------------
+-- FRIENDS: requests by username; accepted friends can DM each other
+-- ---------------------------------------------------------------------
+create table if not exists public.friendships (
+  id          uuid primary key default gen_random_uuid(),
+  requester   uuid not null references public.profiles (id) on delete cascade,
+  addressee   uuid not null references public.profiles (id) on delete cascade,
+  status      text not null default 'pending' check (status in ('pending', 'accepted')),
+  created_at  timestamptz not null default now(),
+  check (requester <> addressee)
+);
+-- one row per pair, whichever way round
+create unique index if not exists friendships_pair
+  on public.friendships (least(requester, addressee), greatest(requester, addressee));
+alter table public.friendships enable row level security;
+
+drop policy if exists "see own friendships" on public.friendships;
+create policy "see own friendships" on public.friendships
+  for select using (auth.uid() in (requester, addressee));
+-- removing a friend / cancelling / declining a request
+drop policy if exists "remove own friendships" on public.friendships;
+create policy "remove own friendships" on public.friendships
+  for delete using (auth.uid() in (requester, addressee));
+
+-- Send a request by username. If they already asked you, you become friends.
+create or replace function public.send_friend_request(friend_name text)
+returns public.friendships language plpgsql security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  them uuid;
+  f public.friendships;
+begin
+  if me is null then raise exception 'Not logged in'; end if;
+  select id into them from public.profiles where lower(username) = lower(trim(friend_name));
+  if them is null then raise exception 'No one with that username'; end if;
+  if them = me then raise exception 'That''s you!'; end if;
+  select * into f from public.friendships
+   where least(requester, addressee) = least(me, them) and greatest(requester, addressee) = greatest(me, them);
+  if found then
+    if f.status = 'pending' and f.addressee = me then
+      update public.friendships set status = 'accepted' where id = f.id returning * into f;
+    end if;
+    return f;
+  end if;
+  insert into public.friendships (requester, addressee) values (me, them) returning * into f;
+  return f;
+end $$;
+grant execute on function public.send_friend_request(text) to authenticated;
+
+-- Accept a request someone sent you
+create or replace function public.accept_friend_request(request_id uuid)
+returns public.friendships language plpgsql security definer set search_path = public as $$
+declare f public.friendships;
+begin
+  update public.friendships set status = 'accepted'
+   where id = request_id and addressee = auth.uid() and status = 'pending'
+   returning * into f;
+  if not found then raise exception 'Request not found'; end if;
+  return f;
+end $$;
+grant execute on function public.accept_friend_request(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- DIRECT MESSAGES: a private two-person room (kind = 'dm'), no join code.
+-- They use the normal messages table, so chat works the same.
+-- ---------------------------------------------------------------------
+alter table public.rooms add column if not exists kind text not null default 'room';
+alter table public.rooms drop constraint if exists rooms_kind_check;
+alter table public.rooms add constraint rooms_kind_check check (kind in ('room', 'dm'));
+
+-- Open (or create) the DM with a friend
+create or replace function public.open_dm(friend uuid)
+returns public.rooms language plpgsql security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  r public.rooms;
+begin
+  if me is null then raise exception 'Not logged in'; end if;
+  if not exists (
+    select 1 from public.friendships
+     where status = 'accepted'
+       and least(requester, addressee) = least(me, friend)
+       and greatest(requester, addressee) = greatest(me, friend)
+  ) then raise exception 'You can only message friends'; end if;
+  select rm.* into r from public.rooms rm
+   where rm.kind = 'dm'
+     and exists (select 1 from public.room_members a where a.room_id = rm.id and a.user_id = me)
+     and exists (select 1 from public.room_members b where b.room_id = rm.id and b.user_id = friend)
+   limit 1;
+  if found then return r; end if;
+  insert into public.rooms (name, is_private, kind, created_by)
+  values ('Direct message', true, 'dm', me) returning * into r;
+  insert into public.room_members (room_id, user_id) values (r.id, me), (r.id, friend);
+  return r;
+end $$;
+grant execute on function public.open_dm(uuid) to authenticated;
+
+-- unfriending closes your shared DM (it can be reopened if you're friends again)
+create or replace function public.friendship_removed()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.rooms rm
+   where rm.kind = 'dm'
+     and exists (select 1 from public.room_members a where a.room_id = rm.id and a.user_id = old.requester)
+     and exists (select 1 from public.room_members b where b.room_id = rm.id and b.user_id = old.addressee);
+  return old;
+end $$;
+drop trigger if exists friendship_removed on public.friendships;
+create trigger friendship_removed after delete on public.friendships
+  for each row execute function public.friendship_removed();
+
+-- live updates for friend requests
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'friendships'
+  ) then
+    alter publication supabase_realtime add table public.friendships;
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- EMULATOR CLOUD SAVES: private bucket, each user only sees their own
+-- folder (saves/<user id>/<game>.state and .srm)
+-- ---------------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('saves', 'saves', false, 52428800)
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit;
+
+drop policy if exists "read own saves" on storage.objects;
+create policy "read own saves" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'saves' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "write own saves" on storage.objects;
+create policy "write own saves" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'saves' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "update own saves" on storage.objects;
+create policy "update own saves" on storage.objects
+  for update to authenticated
+  using (bucket_id = 'saves' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "delete own saves" on storage.objects;
+create policy "delete own saves" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'saves' and (storage.foldername(name))[1] = auth.uid()::text);

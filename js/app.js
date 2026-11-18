@@ -1,4 +1,5 @@
-import { decorate } from './xmas.js';
+import { decorate, countdownEl } from './xmas.js';
+import './cloudsaves.js';
 import { CONFIG } from './config.js';
 import { h, $, icon, toast, avatarEl, esc } from './ui.js';
 import { settings, saveSettings, on, emit } from './store.js';
@@ -300,9 +301,8 @@ const ctx = {
   activateView(view) { viewControls?.activate(view); },
   /** Desktop: opens a URL in its own window and returns true. Browser: returns false. */
   openFrame(title, url, opts = {}) {
-    if (settings.layout !== 'desktop') return false;
-    wm.frame(title, url, opts);
-    return true;
+    if (settings.layout !== 'desktop') return null;
+    return wm.frame(title, url, opts); // the window's iframe
   },
 };
 
@@ -593,15 +593,17 @@ const wm = {
 
   frame(title, url, { iconName = 'games', width, height } = {}) {
     const key = `frame-${Date.now()}`;
+    const frame = h('iframe', { src: url, allow: 'autoplay; fullscreen; gamepad; clipboard-write', allowfullscreen: true, title });
     this.create({
       key, title, iconName, width, height,
       mount: (view, body) => {
         view.remove();
         body.className = 'win-body frame-body';
-        body.append(h('iframe', { src: url, allow: 'autoplay; fullscreen; gamepad; clipboard-write', allowfullscreen: true, title }));
+        body.append(frame);
         return () => {};
       },
     });
+    return frame;
   },
 
   create({ key, title, iconName, mount, width = 960, height = 620 }) {
@@ -728,7 +730,7 @@ function buildDesktop() {
   const weather = h('div', { class: 'w-weather' });
   const system = h('div', { class: 'w-system' });
   const widgets = h('aside', { class: 'desk-widgets' },
-    bigTime, bigDate,
+    bigTime, bigDate, countdownEl('desk'),
     h('div', { class: 'w-head' }, 'Weather'), weather,
     h('div', { class: 'w-head' }, 'System'), system);
 

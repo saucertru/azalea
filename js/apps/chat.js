@@ -1,10 +1,14 @@
-// Chat: public rooms, private rooms (join with a code) and game sharing.
+// Chat: public rooms, private rooms (join with a code), direct messages
+// with friends, and game sharing.
 import { h, icon, toast, empty, spinner, modal, avatarEl, timeAgo, debounce, confirmBox } from '../ui.js';
 import { sb } from '../supabase.js';
 import { session, getProfile, cacheProfile, leaveGuest } from '../auth.js';
 import { getManifest } from '../data.js';
 import { gameCover } from './games.js';
 import { showProfileModal } from './profile.js';
+import { on } from '../store.js';
+import { isOnline } from '../presence.js';
+import { loadFriends, sendRequest, acceptRequest, removeFriendship, openDm, relationTo, watchFriends } from '../friends.js';
 
 const PROFILE_COLS = 'id, username, avatar_url, banner_url, bio, created_at';
 
@@ -47,7 +51,12 @@ export default {
     let lastSend = 0;
     let pendingShare = null;
     let games = [];
+    let friendsData = { friends: [], incoming: [], outgoing: [] };
+    const dmFriend = new Map(); // DM room id -> friend's user id
+    const unread = new Set();   // friend user ids with unread DMs
+    let dmWatch = null;
 
+    const friendsBtn = h('button', { class: 'btn sm grow friends-btn', onClick: () => friendsModal() });
     const roomList = h('div', { class: 'room-list' });
     const shareBanner = h('div', { class: 'share-banner hidden' });
     const head = h('div', { class: 'chat-head' });
@@ -62,6 +71,7 @@ export default {
         h('div', { class: 'row gap' },
           h('button', { class: 'btn sm primary grow', onClick: createRoom }, h('span', { html: icon('plus', 14) }), 'New room'),
           h('button', { class: 'btn sm grow', onClick: joinByCode }, h('span', { html: icon('key', 14) }), 'Join code')),
+        h('div', { class: 'row gap' }, friendsBtn),
         roomList),
       pane);
     el.append(shareBanner, layout);
@@ -70,9 +80,15 @@ export default {
 
     // ---------- rooms ----------
     async function loadRooms() {
-      const { data, error } = await sb.from('rooms').select('id, name, is_private, code, created_by, created_at').order('created_at');
+      const { data, error } = await sb.from('rooms').select('id, name, is_private, code, kind, created_by, created_at').order('created_at');
       if (error) { roomList.replaceChildren(empty('Could not load rooms', error.message)); return; }
-      rooms = data;
+      rooms = data.filter((r) => r.kind !== 'dm');
+      const dmIds = data.filter((r) => r.kind === 'dm').map((r) => r.id);
+      dmFriend.clear();
+      if (dmIds.length) {
+        const { data: mem } = await sb.from('room_members').select('room_id, user_id').in('room_id', dmIds).neq('user_id', session.user.id);
+        for (const m of mem || []) dmFriend.set(m.room_id, m.user_id);
+      }
       renderRooms();
     }
 
@@ -81,7 +97,19 @@ export default {
       const priv = rooms.filter((r) => r.is_private);
       const item = (r) => h('button', { class: `room${current?.id === r.id ? ' on' : ''}`, onClick: () => openRoom(r) },
         h('span', { html: icon(r.is_private ? 'lock' : 'chat', 16) }), h('span', { class: 'clamp1' }, r.name));
+      const friendItem = (f) => h('button', {
+        class: `room dm${current?.kind === 'dm' && current.friend?.id === f.user.id ? ' on' : ''}`,
+        onClick: () => openFriend(f.user),
+      },
+      h('span', { class: 'dm-av' }, avatarEl(f.user, 22), h('i', { class: `dot${isOnline(f.user.id) ? ' online' : ''}` })),
+      h('span', { class: 'clamp1 grow' }, f.user.username),
+      unread.has(f.user.id) ? h('i', { class: 'unread-dot', title: 'New messages' }) : null);
+      const n = friendsData.incoming.length;
+      friendsBtn.replaceChildren(...[h('span', { html: icon('user', 14) }), 'Friends', n ? h('span', { class: 'badge' }, String(n)) : null].filter(Boolean));
       roomList.replaceChildren(
+        h('div', { class: 'muted tiny list-label' }, 'Direct messages'),
+        ...(friendsData.friends.length ? friendsData.friends.map(friendItem)
+          : [h('div', { class: 'muted small pad' }, 'Add friends to message them')]),
         h('div', { class: 'muted tiny list-label' }, 'Public rooms'),
         ...(pub.length ? pub.map(item) : [h('div', { class: 'muted small pad' }, 'None yet')]),
         h('div', { class: 'muted tiny list-label' }, 'Private rooms'),
@@ -155,6 +183,16 @@ export default {
 
     function renderHead() {
       if (!current) { head.replaceChildren(h('b', {}, 'Chat')); return; }
+      if (current.kind === 'dm') {
+        const f = current.friend || { username: 'Friend' };
+        head.replaceChildren(
+          h('button', { class: 'icon-btn sm back-rooms', html: icon('back', 16), 'aria-label': 'Rooms', onClick: () => layout.classList.remove('in-room') }),
+          h('button', { class: 'dm-head', onClick: () => showProfileModal(f.id ? f : null) }, avatarEl(f, 26),
+            h('b', { class: 'clamp1' }, f.username),
+            h('span', { class: `muted tiny${isOnline(f.id) ? ' is-online' : ''}` }, isOnline(f.id) ? 'online' : 'offline')),
+          h('span', { class: 'grow' }));
+        return;
+      }
       head.replaceChildren(
         h('button', { class: 'icon-btn sm back-rooms', html: icon('back', 16), 'aria-label': 'Rooms', onClick: () => layout.classList.remove('in-room') }),
         h('span', { html: icon(current.is_private ? 'lock' : 'chat', 18) }),
@@ -168,6 +206,7 @@ export default {
 
     async function openRoom(r) {
       current = r;
+      if (r.kind === 'dm' && r.friend) unread.delete(r.friend.id);
       layout.classList.add('in-room');
       renderRooms();
       renderHead();
@@ -190,7 +229,7 @@ export default {
 
       channel = sb.channel(`room-${roomId}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, async ({ new: m }) => {
-          if (messages.some((x) => x.id === m.id)) return;
+          if (m.room_id !== roomId || messages.some((x) => x.id === m.id)) return;
           m.profiles = await getProfile(m.user_id);
           if (current?.id !== roomId) return;
           messages.push(m);
@@ -221,17 +260,17 @@ export default {
         body = h('div', { class: 'msg-text' }, ...linkify(m.content));
       }
       return h('div', { class: `msg${grouped ? ' grouped' : ''}${mine ? ' mine' : ''}`, dataset: { id: m.id } },
-        grouped ? h('div', { class: 'msg-gutter' }) : h('button', { class: 'msg-av', onClick: () => showProfileModal(p.id ? p : null) }, avatarEl(p, 36)),
+        grouped ? h('div', { class: 'msg-gutter' }) : h('button', { class: 'msg-av', onClick: () => showPerson(p) }, avatarEl(p, 36)),
         h('div', { class: 'msg-main' },
           grouped ? null : h('div', { class: 'msg-meta' },
-            h('button', { class: 'msg-name', onClick: () => showProfileModal(p.id ? p : null) }, p.username),
+            h('button', { class: 'msg-name', onClick: () => showPerson(p) }, p.username),
             h('span', { class: 'muted tiny', title: new Date(m.created_at).toLocaleString() }, timeAgo(m.created_at))),
           body),
         mine ? h('button', { class: 'icon-btn sm msg-del', title: 'Delete', html: icon('trash', 14), onClick: () => del(m) }) : null);
     }
 
     function renderMessages() {
-      if (!messages.length) { msgList.replaceChildren(empty('No messages yet', 'Say hi!')); return; }
+      if (!messages.length) { msgList.replaceChildren(empty('No messages yet', current?.kind === 'dm' ? `Say hi to ${current.friend?.username || 'your friend'}!` : 'Say hi!')); return; }
       msgList.replaceChildren(...messages.map((m, i) => msgEl(m, messages[i - 1])));
       msgList.scrollTop = msgList.scrollHeight;
     }
@@ -303,9 +342,130 @@ export default {
       shareBanner.classList.remove('hidden');
       shareBanner.replaceChildren(
         h('span', { html: icon('share', 16) }),
-        h('span', { class: 'grow' }, current ? `Share “${pendingShare.title}” in ${current.name}?` : `Pick a room to share “${pendingShare.title}”`),
+        h('span', { class: 'grow' }, current ? `Share “${pendingShare.title}” with ${current.kind === 'dm' ? current.friend?.username : current.name}?` : `Pick a room or friend to share “${pendingShare.title}”`),
         current ? h('button', { class: 'btn sm primary', onClick: async () => { if (await shareGame(pendingShare)) { pendingShare = null; updateShareBanner(); } } }, 'Share here') : null,
         h('button', { class: 'btn sm', onClick: () => { pendingShare = null; updateShareBanner(); } }, 'Cancel'));
+    }
+
+    // ---------- friends + direct messages ----------
+    async function refreshFriends() {
+      try {
+        friendsData = await loadFriends();
+      } catch (e) {
+        console.warn('friends:', e.message);
+      }
+      if (!alive) return;
+      renderRooms();
+      if (current?.kind === 'dm' && !friendsData.friends.some((f) => f.user.id === current.friend?.id)) {
+        // unfriended: close the chat
+        closeChannel();
+        current = null;
+        renderHead();
+        msgList.replaceChildren(empty('Pick a room'));
+        setComposer(false);
+      }
+      if (openFriendsModal) openFriendsModal.redraw();
+    }
+
+    async function openFriend(user) {
+      try {
+        const room = await openDm(user.id);
+        dmFriend.set(room.id, user.id);
+        openRoom({ ...room, friend: user });
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    }
+
+    function watchDms() {
+      // a dot next to friends who message you while you're elsewhere
+      dmWatch = sb.channel('dm-watch')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async ({ new: m }) => {
+          if (m.user_id === session.user.id) return;
+          let fid = dmFriend.get(m.room_id);
+          if (!fid) {
+            // a DM a friend just started with us
+            if (!friendsData.friends.some((f) => f.user.id === m.user_id)) return;
+            const { data } = await sb.from('rooms').select('kind').eq('id', m.room_id).maybeSingle();
+            if (data?.kind !== 'dm') return;
+            dmFriend.set(m.room_id, m.user_id);
+            fid = m.user_id;
+          }
+          if (current?.id === m.room_id) return;
+          unread.add(fid);
+          renderRooms();
+        })
+        .subscribe();
+    }
+
+    /** Profile popup with Add friend / Message buttons. */
+    async function showPerson(p) {
+      if (!p?.id) return;
+      const actions = h('div', { class: 'row gap pf-actions' });
+      const pm = showProfileModal(p, actions);
+      if (p.id === session.user.id) return;
+      const { rel, id } = await relationTo(p.id);
+      const btn = (label, cls, fn) => h('button', { class: `btn sm ${cls}`, onClick: async (e) => {
+        e.currentTarget.disabled = true;
+        try { await fn(); } catch (err) { toast(err.message, 'error'); }
+        pm?.close();
+      } }, label);
+      if (rel === 'friend') actions.append(btn('Message', 'primary', () => openFriend(p)));
+      else if (rel === 'incoming') actions.append(btn('Accept friend request', 'primary', () => acceptRequest(id).then(() => toast(`You and ${p.username} are now friends`, 'success'))));
+      else if (rel === 'outgoing') actions.append(h('span', { class: 'muted small' }, 'Friend request sent'));
+      else actions.append(btn('Add friend', 'primary', () => sendRequest(p.username).then((r) => toast(r === 'accepted' ? `You and ${p.username} are now friends` : 'Friend request sent', 'success'))));
+    }
+
+    let openFriendsModal = null;
+    function friendsModal() {
+      const name = h('input', { class: 'input', placeholder: 'Username', maxlength: 20, autocapitalize: 'off', spellcheck: 'false' });
+      const add = async () => {
+        const u = name.value.trim();
+        if (!u) return;
+        try {
+          const r = await sendRequest(u);
+          name.value = '';
+          toast(r === 'accepted' ? `You and ${u} are now friends` : `Friend request sent to ${u}`, 'success');
+        } catch (e) {
+          toast(e.message, 'error');
+        }
+      };
+      name.addEventListener('keydown', (e) => e.key === 'Enter' && add());
+      const body = h('div', {});
+      const person = (u, ...btns) => h('div', { class: 'friend-row' },
+        h('span', { class: 'dm-av' }, avatarEl(u, 30), h('i', { class: `dot${isOnline(u.id) ? ' online' : ''}` })),
+        h('button', { class: 'link-btn grow clamp1 friend-name', onClick: () => showProfileModal(u) }, u.username), ...btns);
+      const act = (label, cls, fn) => h('button', { class: `btn sm ${cls}`, onClick: async (e) => {
+        e.currentTarget.disabled = true;
+        try { await fn(); } catch (err) { toast(err.message, 'error'); e.currentTarget.disabled = false; }
+      } }, label);
+      const redraw = () => {
+        const { friends, incoming, outgoing } = friendsData;
+        body.replaceChildren(...[
+          incoming.length ? h('div', { class: 'muted tiny list-label' }, 'Friend requests') : null,
+          ...incoming.map((r) => person(r.user,
+            act('Accept', 'primary', () => acceptRequest(r.id)),
+            act('Decline', '', () => removeFriendship(r.id)))),
+          h('div', { class: 'muted tiny list-label' }, `Friends (${friends.length})`),
+          ...(friends.length ? friends.map((f) => person(f.user,
+            act('Message', 'primary', async () => { m.close(); await openFriend(f.user); }),
+            act('Remove', '', async () => {
+              if (await confirmBox('Remove friend?', `You and ${f.user.username} won’t be able to message each other.`, 'Remove', true)) await removeFriendship(f.id);
+            })))
+            : [h('p', { class: 'muted small' }, 'No friends yet. Add someone by their username.')]),
+          outgoing.length ? h('div', { class: 'muted tiny list-label' }, 'Sent requests') : null,
+          ...outgoing.map((r) => person(r.user, act('Cancel', '', () => removeFriendship(r.id))))].filter(Boolean));
+      };
+      redraw();
+      const m = modal({
+        title: 'Friends',
+        content: h('div', { class: 'friends-modal' },
+          h('div', { class: 'row gap' }, name, h('button', { class: 'btn primary', onClick: add }, 'Add friend')),
+          body),
+      });
+      openFriendsModal = { redraw };
+      const close = m.close;
+      m.close = () => { openFriendsModal = null; close(); };
     }
 
     sendBtn.onclick = send;
@@ -314,10 +474,18 @@ export default {
     renderHead();
     msgList.replaceChildren(empty('Pick a room', 'Choose a room on the left, make your own, or join one with a code.'));
     roomList.replaceChildren(spinner());
-    loadRooms().then(() => {
+    watchFriends();
+    watchDms();
+    const offFriends = on('friends', refreshFriends);
+    const offOnline = on('online', () => { renderRooms(); if (current?.kind === 'dm') renderHead(); });
+    Promise.all([loadRooms(), refreshFriends()]).then(() => {
       if (params.room) {
         const r = rooms.find((x) => x.id === params.room);
         if (r) openRoom(r);
+      }
+      if (params.dm) {
+        const f = friendsData.friends.find((x) => x.user.id === params.dm);
+        if (f) openFriend(f.user);
       }
     });
 
@@ -335,6 +503,9 @@ export default {
       alive = false;
       clearInterval(timer);
       closeChannel();
+      if (dmWatch) sb.removeChannel(dmWatch);
+      offFriends();
+      offOnline();
     };
   },
 };

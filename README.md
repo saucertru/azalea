@@ -86,6 +86,19 @@ In Supabase, go to **Authentication**, then **URL Configuration**:
 - **Site URL:** `https://azalea.blazess-mc.workers.dev`
 - **Redirect URLs:** `https://azalea.blazess-mc.workers.dev/**` and `https://azalea-3rwy.onrender.com/**`
 
+## Accounts: friends, game stats and cloud saves
+
+- **Friends and direct messages:** in **Chat**, click **Friends** to add someone by username and accept requests.
+  You can also click anyone's name in a chat. Friends appear under **Direct messages**, with a green dot when they're online
+  and a dot when they've sent you something. Removing a friend deletes your direct messages with them.
+- **Game favourites and stats:** star games (☆) on the game card or in the player. Games has **Favourites** and **Most played**
+  filters, cards show your play time, and profiles show total play time, most played games and favourites.
+  Play time only counts while the game is open and the tab is visible. Guests' stats are saved in their browser only.
+- **Emulator cloud saves** (ROMs, logged-in users): the emulator's **Save State** / **Load State** and **Save File** / **Load File**
+  buttons use your account. In-game saves upload every 30 seconds and when you close the game,
+  and they load automatically on any computer you log in on. Saves are private to each user (storage bucket `saves`).
+- **Christmas:** lights, snow and a countdown to Christmas (from 1 November). Turn them off in **Settings**, then **Decorations**.
+
 ## Chrome extensions (in the Web app)
 
 Open a website in the Web app and click the **puzzle button** to open **Extensions**. Then either:
@@ -130,7 +143,8 @@ Only add games, ROMs, music and videos you have the right to share.
 1. Create a project at [supabase.com](https://supabase.com).
 2. Go to **SQL Editor**, then **New query**. Paste all of `supabase/schema.sql` and click **Run**. This creates:
    profiles (username, profile picture, banner, bio, join date, saved settings), chat rooms, private-room codes,
-   messages, PDF uploads, storage buckets and all the security rules.
+   messages, PDF uploads, game stats, friends, direct messages, emulator cloud saves, storage buckets and all the security rules.
+   **After updating the site, run it again** (it's safe to run more than once) so new features get their tables.
 3. Go to **Project Settings**, then **API**. Copy the **Project URL** and the **anon public** key into `js/config.js`.
 4. Go to **Authentication**, then **URL Configuration**. Set **Site URL** to your website's address.
 5. Optional: under **Authentication**, then **Providers**, then **Email**, turn off **Confirm email** so people can log in straight after signing up.
@@ -169,7 +183,11 @@ css/style.css       all styles
 js/app.js           boot, onboarding, browser (tabs) + desktop (dock) layouts, window manager
 js/appmeta.js       app icon colours, search, wallpaper logo
 js/widgets.js       clock, weather and system widgets
-js/presence.js      "users online" count (Supabase Realtime presence)
+js/presence.js      "users online" count and who's online (Supabase Realtime presence)
+js/friends.js       friend requests and direct messages
+js/gamestats.js     game favourites, plays and play time
+js/cloudsaves.js    emulator cloud saves (used by play.html)
+js/xmas.js          Christmas lights, snow and countdown
 js/apps/*.js        one file per app (games, music, videos, pdfs, books, tv, ai, chat, profile, settings, home)
 js/config.js        your settings
 js/themes.js        the 10 themes + fonts

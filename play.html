@@ -63,10 +63,91 @@
     window.EJS_startOnLoaded = true;
     window.EJS_color = '#7c8cff';
     if (core === 'psp' || core === '3ds') window.EJS_threads = true;
+    setupCloudSaves();
     load('https://cdn.emulatorjs.org/stable/data/loader.js');
   } else {
     fail('Unknown game type.');
   }
+  }
+
+  // ---- cloud saves (logged-in users, when opened inside Azalea)
+  // The emulator's Save State / Load State and Save File / Load File
+  // buttons use your account, and in-game saves sync on their own.
+  function setupCloudSaves() {
+    var cloud = null;
+    try { if (window.parent !== window) cloud = window.parent.__azaleaCloud; } catch (e) {}
+    var gid = q.get('id') || '';
+    if (!cloud || !gid || !cloud.enabled()) return;
+
+    function say(text) {
+      try { window.EJS_emulator.displayMessage(text, 3000); } catch (e) {}
+    }
+    function copy(bytes) { return new Uint8Array(bytes); } // into this frame's memory
+
+    window.EJS_onSaveState = function (e) {
+      say('Saving to your account…');
+      cloud.put(gid, 'state', e.state).then(function () { say('Saved to your account'); }, function () { say('Cloud save failed'); });
+    };
+    window.EJS_onLoadState = function () {
+      cloud.get(gid, 'state').then(function (d) {
+        if (!d) { say('No saved state yet'); return; }
+        window.EJS_emulator.gameManager.loadState(copy(d));
+        say('Loaded from your account');
+      }, function () { say('Could not load the save'); });
+    };
+
+    // in-game saves (battery saves)
+    var lastSig = '';
+    function sig(b) {
+      if (!b) return '';
+      var h = 0;
+      for (var i = 0; i < b.length; i += 7) h = (h * 31 + b[i]) | 0;
+      return b.length + ':' + h;
+    }
+    function writeSave(bytes) {
+      var gm = window.EJS_emulator.gameManager;
+      var path = gm.getSaveFilePath();
+      var parts = path.split('/'), dir = '';
+      for (var i = 0; i < parts.length - 1; i++) {
+        if (!parts[i]) continue;
+        dir += '/' + parts[i];
+        if (!gm.FS.analyzePath(dir).exists) gm.FS.mkdir(dir);
+      }
+      if (gm.FS.analyzePath(path).exists) gm.FS.unlink(path);
+      gm.FS.writeFile(path, bytes);
+      gm.loadSaveFiles();
+    }
+    function pushSave(quiet) {
+      var gm = window.EJS_emulator && window.EJS_emulator.gameManager;
+      if (!gm) return Promise.resolve();
+      var bytes;
+      try { bytes = gm.getSaveFile(); } catch (e) { return Promise.resolve(); }
+      var s = sig(bytes);
+      if (!bytes || !bytes.length || s === lastSig) return Promise.resolve();
+      lastSig = s;
+      return cloud.put(gid, 'srm', bytes).then(function () { if (!quiet) say('Game saved to your account'); }, function () { lastSig = ''; });
+    }
+    window.EJS_onSaveSave = function () { pushSave(false); };
+    window.EJS_onLoadSave = function () {
+      cloud.get(gid, 'srm').then(function (d) {
+        if (!d) { say('No saved game yet'); return; }
+        writeSave(copy(d));
+        say('Loaded your saved game');
+      });
+    };
+    window.EJS_onGameStart = function () {
+      // bring in the saved game from the account, then keep it in sync
+      cloud.get(gid, 'srm').then(function (d) {
+        if (d && d.length) {
+          setTimeout(function () {
+            try { writeSave(copy(d)); lastSig = sig(copy(d)); say('Loaded your saved game from your account'); } catch (e) { console.warn(e); }
+          }, 800);
+        }
+      });
+      setInterval(function () { pushSave(true); }, 30000);
+      document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') pushSave(true); });
+      window.addEventListener('pagehide', function () { pushSave(true); });
+    };
   }
 
   // only allow files from this site's games folder, or the games folder of

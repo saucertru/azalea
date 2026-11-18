@@ -711,3 +711,45 @@ body.no-xmas .xmas { display: none; }
 .shell.desktop > .xmas { z-index: 0; }
 .check-row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .check-row input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+/* =====================================================================
+   v1.3: game stats, friends + DMs, Christmas countdown
+   ===================================================================== */
+.row.gap-sm { gap: 6px; }
+.btn.starred { color: #facc15; border-color: rgba(250, 204, 21, .5); }
+
+/* profile: games */
+.pf-games { display: flex; flex-direction: column; gap: 8px; }
+.pf-stat-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.pf-stat { flex: 1; min-width: 90px; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; }
+.pf-stat b { font-size: 1.15em; }
+.pf-game-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.pf-game { display: flex; flex-direction: column; gap: 3px; padding: 0; border: 0; background: none; text-align: left; color: var(--text); min-width: 0; font-size: .85em; }
+.pf-game:disabled { cursor: default; opacity: 1; }
+.pf-game-cover { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); background: var(--bg2); display: grid; place-items: center; font-weight: 800; color: #fff; }
+.pf-card-games { padding: 0 20px; }
+.pf-card-games:empty { display: none; }
+.pf-card-games h4 { margin: 14px 0 8px; }
+.pf-actions { padding: 12px 20px 0; }
+.pf-actions:empty { display: none; }
+
+/* chat: friends + direct messages */
+.friends-btn { justify-content: center; }
+.badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #ef4444; color: #fff; font-size: .72em; font-weight: 700; display: inline-grid; place-items: center; }
+.dm-av { position: relative; display: inline-flex; flex-shrink: 0; }
+.dm-av .dot { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border-radius: 50%; background: #6b7280; border: 2px solid var(--panel); }
+.dm-av .dot.online { background: #22c55e; }
+.room.dm { padding: 6px 10px; }
+.unread-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+.dm-head { display: flex; align-items: center; gap: 9px; border: 0; background: none; color: var(--text); padding: 0; min-width: 0; }
+.dm-head .is-online { color: #22c55e; }
+.friends-modal { display: flex; flex-direction: column; gap: 6px; min-width: min(420px, 80vw); }
+.friends-modal .list-label { margin-top: 10px; }
+.friend-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.friend-name { padding: 0; color: var(--text); font-weight: 600; text-align: left; }
+
+/* Christmas countdown (hidden with the decorations) */
+body.no-xmas .xmas-count { display: none; }
+.xmas-count { font-size: .82em; font-weight: 600; }
+.xmas-count.home { margin-top: 8px; color: var(--muted); }
+.xmas-count.desk { margin: 6px 0 4px; letter-spacing: .02em; opacity: .9; }
