@@ -23,6 +23,15 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
+// Like h(), make append/replaceChildren skip null and false, so optional
+// pieces (cond ? el : null) never show up as the text "null".
+for (const name of ['append', 'prepend', 'replaceChildren']) {
+  const orig = Element.prototype[name];
+  Element.prototype[name] = function (...nodes) {
+    return orig.apply(this, nodes.filter((n) => n != null && n !== false));
+  };
+}
+
 export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -76,7 +85,7 @@ export function toast(msg, type = 'info', ms = 3200) {
 }
 
 // ---------- modal ----------
-export function modal({ title, content, actions = [], wide = false, onClose } = {}) {
+export function modal({ title, content, actions = [], wide = false, onClose, className = '' } = {}) {
   const close = () => {
     overlay.remove();
     document.removeEventListener('keydown', onKey);
@@ -84,7 +93,7 @@ export function modal({ title, content, actions = [], wide = false, onClose } = 
   };
   const onKey = (e) => e.key === 'Escape' && close();
   const overlay = h('div', { class: 'modal-overlay', onClick: (e) => e.target === overlay && close() },
-    h('div', { class: `modal${wide ? ' wide' : ''}`, role: 'dialog', 'aria-modal': 'true' },
+    h('div', { class: `modal${wide ? ' wide' : ''}${className ? ` ${className}` : ''}`, role: 'dialog', 'aria-modal': 'true' },
       h('div', { class: 'modal-head' },
         h('h3', {}, title || ''),
         h('button', { class: 'icon-btn', 'aria-label': 'Close', html: icon('close'), onClick: close })),
@@ -177,16 +186,35 @@ export function pickFile(accept) {
   });
 }
 
-export function avatarEl(profile, size = 36) {
-  const name = profile?.username || '?';
+const DECO_EMOJI = { snow: '❄️', holly: '🎄', flame: '🔥', hearts: '💖', pixel: '👾' };
+const STATUS_COLOR = { online: '#23a55a', idle: '#f0b232', dnd: '#f23f43' };
+
+/**
+ * A round avatar. Options:
+ *   status: 'online' | 'idle' | 'dnd' | null (offline) - adds a status dot
+ *   deco: false to hide the profile's avatar decoration
+ */
+export function avatarEl(profile, size = 36, { status, deco = true } = {}) {
+  const name = (profile?.display_name || profile?.username || '?').trim() || '?';
   const el = h('div', { class: 'avatar', style: { width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.42)}px` } });
   if (profile?.avatar_url) el.append(h('img', { src: profile.avatar_url, alt: '', loading: 'lazy' }));
-  else el.textContent = name[0].toUpperCase();
-  return el;
+  else el.textContent = [...name][0].toUpperCase();
+  const d = deco && profile?.avatar_deco;
+  if (!d && status === undefined) return el;
+  const wrap = h('span', { class: `av${d ? ` deco deco-${d}` : ''}`, style: { width: `${size}px`, height: `${size}px` } }, el);
+  if (d) {
+    wrap.append(h('i', { class: 'av-ring' }));
+    if (DECO_EMOJI[d] && size >= 28) wrap.append(h('i', { class: 'av-emoji' }, DECO_EMOJI[d]));
+  }
+  if (status !== undefined) {
+    wrap.append(h('i', { class: 'av-status', title: status ? { online: 'Online', idle: 'Idle', dnd: 'Do not disturb' }[status] : 'Offline', style: { background: STATUS_COLOR[status] || '#80848e' } }));
+  }
+  return wrap;
 }
 
 // ---------- icons (simple stroke icons) ----------
 const P = {
+  shield: '<path d="M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/>',
   home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/>',
   games: '<rect x="2" y="7" width="20" height="11" rx="5"/><path d="M7 11v3M5.5 12.5h3"/><circle cx="16" cy="11.5" r="1"/><circle cx="18" cy="13.5" r="1"/>',
   music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',

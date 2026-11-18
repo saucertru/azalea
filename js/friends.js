@@ -3,8 +3,8 @@
 import { sb } from './supabase.js';
 import { session, cacheProfile } from './auth.js';
 import { emit } from './store.js';
+import { PROFILE_COLS, displayName } from './profilekit.js';
 
-const PROFILE_COLS = 'id, username, avatar_url, banner_url, bio, created_at';
 export const canUseFriends = () => Boolean(sb && session.user && !session.guest && !session.offline);
 
 /**
@@ -31,7 +31,7 @@ export async function loadFriends() {
     else if (f.addressee === me) out.incoming.push({ id: f.id, user });
     else out.outgoing.push({ id: f.id, user });
   }
-  out.friends.sort((a, b) => a.user.username.localeCompare(b.user.username));
+  out.friends.sort((a, b) => displayName(a.user).localeCompare(displayName(b.user)));
   return out;
 }
 

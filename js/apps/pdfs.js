@@ -53,8 +53,8 @@ export default {
         return;
       }
       upGrid.replaceChildren(...(u.length ? u.map((x) => pdfCard(x, () => open(x),
-        x.user_id === session.user?.id
-          ? h('button', { class: 'icon-btn sm card-del', title: 'Delete', html: icon('trash', 16), onClick: (e) => { e.stopPropagation(); remove(x); } })
+        x.user_id === session.user?.id || (x.user_id && session.profile?.is_admin)
+          ? h('button', { class: 'icon-btn sm card-del', title: x.user_id === session.user?.id ? 'Delete' : 'Delete (admin)', html: icon('trash', 16), onClick: (e) => { e.stopPropagation(); remove(x); } })
           : null)) : [empty(uploads.length ? 'No matches' : 'No uploads yet')]));
     }
 

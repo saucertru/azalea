@@ -1,5 +1,6 @@
 // Accounts: Supabase auth + profiles. Falls back to a local "setup mode"
 // profile when Supabase keys are not set yet, so the site is still usable.
+import { PROFILE_COLS } from './profilekit.js';
 import { sb, configured } from './supabase.js';
 import { settings, saveSettings, setSyncHook, emit, getLocal, setLocal } from './store.js';
 import { resizeImage, blobToDataUrl, confirmBox } from './ui.js';
@@ -203,7 +204,7 @@ export async function getProfile(id) {
   if (session.profile?.id === id) return session.profile;
   if (profileCache.has(id)) return profileCache.get(id);
   if (!sb) return null;
-  const { data } = await sb.from('profiles').select('id, username, avatar_url, banner_url, bio, created_at').eq('id', id).maybeSingle();
+  const { data } = await sb.from('profiles').select(PROFILE_COLS).eq('id', id).maybeSingle();
   if (data) profileCache.set(id, data);
   return data;
 }

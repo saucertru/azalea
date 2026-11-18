@@ -1,6 +1,6 @@
 // Shared look + search helpers for the shells and home page.
 import { h, icon } from './ui.js';
-import { APPS, APP_ORDER } from './apps/index.js';
+import { APPS, visibleApps } from './apps/index.js';
 import { getManifest } from './data.js';
 import { launchGame } from './apps/games.js';
 import { proxyAvailable, toUrl } from './proxy.js';
@@ -19,6 +19,7 @@ export const APP_COLORS = {
   chat: ['#4ade80', '#16a34a'],
   profile: ['#818cf8', '#4f46e5'],
   settings: ['#64748b', '#334155'],
+  admin: ['#f87171', '#b91c1c'],
 };
 
 /** Coloured rounded-square app icon. */
@@ -34,7 +35,7 @@ export function appTile(id, size = 48) {
 export function findApp(text) {
   const q = text.trim().toLowerCase();
   if (!q) return null;
-  return APP_ORDER.find((id) => id === q || APPS[id].name.toLowerCase() === q) || null;
+  return visibleApps().find((id) => id === q || APPS[id].name.toLowerCase() === q) || null;
 }
 
 export async function searchAll(text, limit = 6) {
@@ -42,7 +43,7 @@ export async function searchAll(text, limit = 6) {
   if (!q) return { apps: [], games: [] };
   const m = await getManifest();
   return {
-    apps: APP_ORDER.filter((id) => APPS[id].name.toLowerCase().includes(q) || id.includes(q)),
+    apps: visibleApps().filter((id) => APPS[id].name.toLowerCase().includes(q) || id.includes(q)),
     games: m.games.filter((g) => g.title.toLowerCase().includes(q)).slice(0, limit),
   };
 }
@@ -61,7 +62,7 @@ export function openGame(g, ctx) {
 
 /** All apps grid (used by "All Apps" on the home page). */
 export function allAppsGrid(ctx, onPick) {
-  return h('div', { class: 'all-apps' }, APP_ORDER.map((id) =>
+  return h('div', { class: 'all-apps' }, visibleApps().map((id) =>
     h('button', { class: 'all-app', onClick: () => { onPick?.(); ctx.open(id); } }, appTile(id, 52), h('span', {}, APPS[id].name))));
 }
 

@@ -451,3 +451,152 @@ drop policy if exists "delete own saves" on storage.objects;
 create policy "delete own saves" on storage.objects
   for delete to authenticated
   using (bucket_id = 'saves' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- =====================================================================
+-- v1.4: Discord-style profiles + admin tools
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- PROFILE CUSTOMIZATION
+-- ---------------------------------------------------------------------
+alter table public.profiles add column if not exists display_name  text;
+alter table public.profiles add column if not exists pronouns      text;
+alter table public.profiles add column if not exists status        text not null default 'online';
+alter table public.profiles add column if not exists status_text   text;
+alter table public.profiles add column if not exists status_emoji  text;
+alter table public.profiles add column if not exists theme_primary text;
+alter table public.profiles add column if not exists theme_accent  text;
+alter table public.profiles add column if not exists banner_color  text;
+alter table public.profiles add column if not exists avatar_deco   text;
+alter table public.profiles add column if not exists badges        text[] not null default '{}';
+alter table public.profiles add column if not exists is_admin      boolean not null default false;
+alter table public.profiles add column if not exists banned        boolean not null default false;
+
+alter table public.profiles drop constraint if exists profiles_custom_check;
+alter table public.profiles add constraint profiles_custom_check check (
+  (display_name is null or char_length(display_name) between 1 and 32)
+  and (pronouns is null or char_length(pronouns) <= 40)
+  and status in ('online', 'idle', 'dnd', 'invisible')
+  and (status_text is null or char_length(status_text) <= 80)
+  and (status_emoji is null or char_length(status_emoji) <= 16)
+  and (theme_primary is null or theme_primary ~ '^#[0-9a-fA-F]{6}$')
+  and (theme_accent is null or theme_accent ~ '^#[0-9a-fA-F]{6}$')
+  and (banner_color is null or banner_color ~ '^#[0-9a-fA-F]{6}$')
+  and (avatar_deco is null or avatar_deco in ('snow', 'holly', 'neon', 'gold', 'flame', 'rainbow', 'hearts', 'pixel'))
+  and cardinality(badges) <= 12
+);
+
+-- helpers
+create or replace function public.is_admin()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select is_admin from public.profiles where id = auth.uid()), false);
+$$;
+create or replace function public.is_banned()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select banned from public.profiles where id = auth.uid()), false);
+$$;
+grant execute on function public.is_admin() to anon, authenticated;
+
+-- Only admins can change admin / banned / badges. (The SQL editor, where
+-- there's no logged-in user, can change anything.)
+create or replace function public.protect_profile_columns()
+returns trigger language plpgsql as $$
+begin
+  new.id := old.id;
+  new.created_at := old.created_at;
+  if auth.uid() is not null and not public.is_admin() then
+    new.is_admin := old.is_admin;
+    new.banned := old.banned;
+    new.badges := old.badges;
+  end if;
+  -- nobody can remove their own admin by accident
+  if auth.uid() = old.id and old.is_admin then new.is_admin := true; end if;
+  return new;
+end $$;
+
+-- admins can edit anyone's profile (to ban, give badges, or clear a bad bio)
+drop policy if exists "admins update profiles" on public.profiles;
+create policy "admins update profiles" on public.profiles
+  for update using (public.is_admin()) with check (public.is_admin());
+
+-- banned users can't send messages, make rooms, add friends or upload PDFs
+drop policy if exists "send messages" on public.messages;
+create policy "send messages" on public.messages
+  for insert to authenticated
+  with check (user_id = auth.uid() and public.can_see_room(room_id) and not public.is_banned());
+
+drop policy if exists "upload own pdfs" on public.pdf_uploads;
+create policy "upload own pdfs" on public.pdf_uploads
+  for insert to authenticated with check (user_id = auth.uid() and not public.is_banned());
+
+create or replace function public.check_not_banned()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if public.is_banned() then raise exception 'Your account is banned'; end if;
+  return new;
+end $$;
+drop trigger if exists rooms_not_banned on public.rooms;
+create trigger rooms_not_banned before insert on public.rooms
+  for each row execute function public.check_not_banned();
+drop trigger if exists friendships_not_banned on public.friendships;
+create trigger friendships_not_banned before insert on public.friendships
+  for each row execute function public.check_not_banned();
+
+-- moderation: admins can delete any message or PDF
+drop policy if exists "admins delete messages" on public.messages;
+create policy "admins delete messages" on public.messages
+  for delete using (public.is_admin());
+drop policy if exists "admins delete pdfs" on public.pdf_uploads;
+create policy "admins delete pdfs" on public.pdf_uploads
+  for delete using (public.is_admin());
+drop policy if exists "admins delete pdf files" on storage.objects;
+create policy "admins delete pdf files" on storage.objects
+  for delete to authenticated using (bucket_id = 'pdfs' and public.is_admin());
+
+-- ---------------------------------------------------------------------
+-- SITE SETTINGS (the announcement bar) - everyone reads, admins write
+-- ---------------------------------------------------------------------
+create table if not exists public.site_settings (
+  id            int primary key default 1 check (id = 1),
+  announcement  text check (char_length(announcement) <= 300),
+  updated_at    timestamptz not null default now()
+);
+insert into public.site_settings (id) values (1) on conflict do nothing;
+alter table public.site_settings enable row level security;
+drop policy if exists "site settings are public" on public.site_settings;
+create policy "site settings are public" on public.site_settings for select using (true);
+drop policy if exists "admins edit site settings" on public.site_settings;
+create policy "admins edit site settings" on public.site_settings
+  for update using (public.is_admin()) with check (public.is_admin());
+
+-- ---------------------------------------------------------------------
+-- ADMIN STATS
+-- ---------------------------------------------------------------------
+create or replace function public.admin_stats()
+returns json language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'Admins only'; end if;
+  return json_build_object(
+    'users',        (select count(*) from public.profiles),
+    'new_users_7d', (select count(*) from public.profiles where created_at > now() - interval '7 days'),
+    'banned',       (select count(*) from public.profiles where banned),
+    'messages',     (select count(*) from public.messages),
+    'messages_24h', (select count(*) from public.messages where created_at > now() - interval '1 day'),
+    'rooms',        (select count(*) from public.rooms where kind = 'room'),
+    'dms',          (select count(*) from public.rooms where kind = 'dm'),
+    'friendships',  (select count(*) from public.friendships where status = 'accepted'),
+    'pdfs',         (select count(*) from public.pdf_uploads),
+    'plays',        (select coalesce(sum(plays), 0) from public.game_stats),
+    'play_seconds', (select coalesce(sum(seconds), 0) from public.game_stats),
+    'top_games',    (select coalesce(json_agg(t), '[]'::json) from (
+                      select game_id, max(title) as title, sum(plays) as plays, sum(seconds) as seconds,
+                             count(*) filter (where favourite) as favourites
+                        from public.game_stats group by game_id order by sum(seconds) desc limit 10) t)
+  );
+end $$;
+grant execute on function public.admin_stats() to authenticated;
+
+-- ---------------------------------------------------------------------
+-- MAKE YOURSELF ADMIN: run this once with your own username
+--   update public.profiles set is_admin = true where lower(username) = lower('YOUR_USERNAME');
+-- ---------------------------------------------------------------------

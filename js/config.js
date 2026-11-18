@@ -19,6 +19,10 @@ export const CONFIG = {
   // The build lists the bucket and adds its files to the site.
   mediaUrl: 'https://pub-2fac51d89b02441bbf0005ec8bcbd3c0.r2.dev',
 
+  // Where the Admin app uploads files to R2: your Cloudflare site (the
+  // Worker in worker/index.mjs). Blank = this same site.
+  adminApiUrl: 'https://azalea.blazess-mc.workers.dev',
+
   // Optional. A free YouTube Data API v3 key turns on YouTube search in
   // Music. Without it you can still paste YouTube links.
   youtubeApiKey: '',

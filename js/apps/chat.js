@@ -7,10 +7,15 @@ import { getManifest } from '../data.js';
 import { gameCover } from './games.js';
 import { showProfileModal } from './profile.js';
 import { on } from '../store.js';
-import { isOnline } from '../presence.js';
+import { isOnline, statusOf } from '../presence.js';
+import { PROFILE_COLS, displayName, statusLabel, badgeList, BADGES } from '../profilekit.js';
 import { loadFriends, sendRequest, acceptRequest, removeFriendship, openDm, relationTo, watchFriends } from '../friends.js';
 
-const PROFILE_COLS = 'id, username, avatar_url, banner_url, bio, created_at';
+
+/** Small badge icons next to a name in chat. */
+function badgesInline(p) {
+  return badgeList(p).slice(0, 3).map((b) => h('span', { class: 'msg-badge', title: BADGES[b].label }, BADGES[b].emoji));
+}
 
 function linkify(text) {
   const out = [];
@@ -101,8 +106,10 @@ export default {
         class: `room dm${current?.kind === 'dm' && current.friend?.id === f.user.id ? ' on' : ''}`,
         onClick: () => openFriend(f.user),
       },
-      h('span', { class: 'dm-av' }, avatarEl(f.user, 22), h('i', { class: `dot${isOnline(f.user.id) ? ' online' : ''}` })),
-      h('span', { class: 'clamp1 grow' }, f.user.username),
+      avatarEl(f.user, 24, { status: statusOf(f.user.id) }),
+      h('span', { class: 'dm-name grow' },
+        h('span', { class: 'clamp1' }, displayName(f.user)),
+        f.user.status_text || f.user.status_emoji ? h('span', { class: 'clamp1 muted tiny' }, `${f.user.status_emoji || ''} ${f.user.status_text || ''}`.trim()) : null),
       unread.has(f.user.id) ? h('i', { class: 'unread-dot', title: 'New messages' }) : null);
       const n = friendsData.incoming.length;
       friendsBtn.replaceChildren(...[h('span', { html: icon('user', 14) }), 'Friends', n ? h('span', { class: 'badge' }, String(n)) : null].filter(Boolean));
@@ -187,9 +194,9 @@ export default {
         const f = current.friend || { username: 'Friend' };
         head.replaceChildren(
           h('button', { class: 'icon-btn sm back-rooms', html: icon('back', 16), 'aria-label': 'Rooms', onClick: () => layout.classList.remove('in-room') }),
-          h('button', { class: 'dm-head', onClick: () => showProfileModal(f.id ? f : null) }, avatarEl(f, 26),
-            h('b', { class: 'clamp1' }, f.username),
-            h('span', { class: `muted tiny${isOnline(f.id) ? ' is-online' : ''}` }, isOnline(f.id) ? 'online' : 'offline')),
+          h('button', { class: 'dm-head', onClick: () => showPerson(f) }, avatarEl(f, 28, { status: statusOf(f.id) }),
+            h('b', { class: 'clamp1' }, displayName(f)),
+            h('span', { class: 'muted tiny' }, f.status_text ? `${f.status_emoji || ''} ${f.status_text}`.trim() : statusLabel(statusOf(f.id)))),
           h('span', { class: 'grow' }));
         return;
       }
@@ -263,14 +270,17 @@ export default {
         grouped ? h('div', { class: 'msg-gutter' }) : h('button', { class: 'msg-av', onClick: () => showPerson(p) }, avatarEl(p, 36)),
         h('div', { class: 'msg-main' },
           grouped ? null : h('div', { class: 'msg-meta' },
-            h('button', { class: 'msg-name', onClick: () => showPerson(p) }, p.username),
+            h('button', { class: 'msg-name', title: `@${p.username}`, onClick: () => showPerson(p) }, displayName(p)),
+            ...badgesInline(p),
             h('span', { class: 'muted tiny', title: new Date(m.created_at).toLocaleString() }, timeAgo(m.created_at))),
           body),
-        mine ? h('button', { class: 'icon-btn sm msg-del', title: 'Delete', html: icon('trash', 14), onClick: () => del(m) }) : null);
+        mine || session.profile?.is_admin
+          ? h('button', { class: 'icon-btn sm msg-del', title: mine ? 'Delete' : 'Delete (admin)', html: icon('trash', 14), onClick: () => del(m) })
+          : null);
     }
 
     function renderMessages() {
-      if (!messages.length) { msgList.replaceChildren(empty('No messages yet', current?.kind === 'dm' ? `Say hi to ${current.friend?.username || 'your friend'}!` : 'Say hi!')); return; }
+      if (!messages.length) { msgList.replaceChildren(empty('No messages yet', current?.kind === 'dm' ? `Say hi to ${displayName(current.friend)}!` : 'Say hi!')); return; }
       msgList.replaceChildren(...messages.map((m, i) => msgEl(m, messages[i - 1])));
       msgList.scrollTop = msgList.scrollHeight;
     }
@@ -342,7 +352,7 @@ export default {
       shareBanner.classList.remove('hidden');
       shareBanner.replaceChildren(
         h('span', { html: icon('share', 16) }),
-        h('span', { class: 'grow' }, current ? `Share “${pendingShare.title}” with ${current.kind === 'dm' ? current.friend?.username : current.name}?` : `Pick a room or friend to share “${pendingShare.title}”`),
+        h('span', { class: 'grow' }, current ? `Share “${pendingShare.title}” with ${current.kind === 'dm' ? displayName(current.friend) : current.name}?` : `Pick a room or friend to share “${pendingShare.title}”`),
         current ? h('button', { class: 'btn sm primary', onClick: async () => { if (await shareGame(pendingShare)) { pendingShare = null; updateShareBanner(); } } }, 'Share here') : null,
         h('button', { class: 'btn sm', onClick: () => { pendingShare = null; updateShareBanner(); } }, 'Cancel'));
     }
@@ -433,8 +443,9 @@ export default {
       name.addEventListener('keydown', (e) => e.key === 'Enter' && add());
       const body = h('div', {});
       const person = (u, ...btns) => h('div', { class: 'friend-row' },
-        h('span', { class: 'dm-av' }, avatarEl(u, 30), h('i', { class: `dot${isOnline(u.id) ? ' online' : ''}` })),
-        h('button', { class: 'link-btn grow clamp1 friend-name', onClick: () => showProfileModal(u) }, u.username), ...btns);
+        avatarEl(u, 32, { status: statusOf(u.id) }),
+        h('button', { class: 'link-btn grow friend-name', onClick: () => showProfileModal(u) },
+          h('span', { class: 'clamp1' }, displayName(u)), h('span', { class: 'muted tiny' }, `@${u.username}`)), ...btns);
       const act = (label, cls, fn) => h('button', { class: `btn sm ${cls}`, onClick: async (e) => {
         e.currentTarget.disabled = true;
         try { await fn(); } catch (err) { toast(err.message, 'error'); e.currentTarget.disabled = false; }

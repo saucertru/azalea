@@ -1,12 +1,13 @@
 import { decorate, countdownEl } from './xmas.js';
 import './cloudsaves.js';
+import { showAnnouncement } from './announce.js';
 import { CONFIG } from './config.js';
 import { h, $, icon, toast, avatarEl, esc } from './ui.js';
 import { settings, saveSettings, on, emit } from './store.js';
 import { applyTheme, THEMES } from './themes.js';
 import { session, initAuth, signUp, signIn, signOut, validUsername, usernameAvailable, continueAsGuest } from './auth.js';
 import { configured, sb } from './supabase.js';
-import { APPS, APP_ORDER } from './apps/index.js';
+import { APPS, visibleApps } from './apps/index.js';
 import { mountMini } from './apps/music.js';
 import { APP_COLORS, appTile, findApp, searchAll, webSearch, openGame } from './appmeta.js';
 import { startPresence } from './presence.js';
@@ -335,6 +336,7 @@ function startShell() {
   document.body.classList.toggle('layout-desktop', settings.layout === 'desktop');
   shell = settings.layout === 'desktop' ? buildDesktop() : buildBrowser();
   startPresence();
+  showAnnouncement().catch(() => {});
   // extensions' chrome.tabs.create opens a new Web tab/window
   setOpener((url, { active, token }) => ctx.openNew('web', { url, _t: token, ...(active ? {} : { _bg: '1' }) }));
 }
@@ -360,7 +362,7 @@ function buildBrowser() {
   const rail = h('nav', { class: 'rail' },
     railBtn('home'),
     h('div', { class: 'rail-apps' }, RAIL_APPS.map(railBtn)),
-    h('div', { class: 'rail-bottom' }, railBtn('profile'), railBtn('settings')));
+    h('div', { class: 'rail-bottom' }, session.profile?.is_admin ? railBtn('admin') : null, railBtn('profile'), railBtn('settings')));
 
   // ---- tab strip + toolbar
   const tabsEl = h('div', { class: 'tabs' });
@@ -717,7 +719,7 @@ const wm = {
 };
 
 function buildDesktop() {
-  const DESK_APPS = APP_ORDER.filter((id) => id !== 'home');
+  const DESK_APPS = visibleApps().filter((id) => id !== 'home');
   const PINNED = ['web', 'games', 'music', 'videos', 'tv', 'chat', 'ai'];
 
   const icons = h('div', { class: 'desk-icons' }, DESK_APPS.map((id) =>
@@ -790,7 +792,7 @@ function buildDesktop() {
     const p = session.profile;
     startMenu.replaceChildren(
       h('div', { class: 'sm-user' }, avatarEl(p, 40), h('div', {}, h('b', {}, p?.username || 'Guest'), h('div', { class: 'muted small' }, session.offline ? 'Setup mode' : session.guest ? 'Guest' : 'Signed in'))),
-      h('div', { class: 'sm-apps' }, APP_ORDER.map((id) =>
+      h('div', { class: 'sm-apps' }, visibleApps().map((id) =>
         h('button', { class: 'sm-app', onClick: () => { toggleStart(false); ctx.open(id); } }, appTile(id, 30), APPS[id].name))),
       h('button', { class: 'sm-logout', onClick: () => signOut() }, h('span', { html: icon('logout', 16) }), session.offline ? 'Reset profile' : session.guest ? 'Log in or sign up' : 'Log out'));
   };

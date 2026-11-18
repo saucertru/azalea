@@ -99,6 +99,42 @@ In Supabase, go to **Authentication**, then **URL Configuration**:
   and they load automatically on any computer you log in on. Saves are private to each user (storage bucket `saves`).
 - **Christmas:** lights, snow and a countdown to Christmas (from 1 November). Turn them off in **Settings**, then **Decorations**.
 
+## Profiles (Discord-style)
+
+In **Profile**, then **Edit profile** (with a live preview):
+- **Display name**, username, **pronouns** and **About me**
+- **Status:** Online, Idle, Do not disturb or Invisible (you look offline). Online switches to Idle after 10 minutes away.
+  Plus a **custom status** with an emoji.
+- **Avatar decoration:** Snowflake, Christmas, Neon, Gold, Flame, Rainbow, Hearts or Pixel
+- **Banner** image or colour, and a two-colour **profile theme**
+- **Badges** are given by admins (Early member, Supporter, Top gamer, Artist, Bug hunter, Verified, Christmas 2026). Admins also get a 🛡️ badge.
+
+Click anyone's name or picture in Chat to see their profile card.
+
+## Admin panel
+
+**Make yourself an admin** (once): in Supabase, open **SQL Editor** and run this with your username:
+```sql
+update public.profiles set is_admin = true where lower(username) = lower('YOUR_USERNAME');
+```
+Reload the site and a 🛡️ **Admin** app appears (in the sidebar, the desktop and All Apps). Only admins can see it.
+
+- **Overview:** users, messages, rooms, friendships, game plays and top games, plus the **announcement** bar
+  (a message at the top of the site for everyone; each person can close it).
+- **Content:** upload to your R2 bucket from the website:
+  - HTML5 games and webports (pick the game's folder; add a title, description and cover)
+  - Flash games, ROMs (pick the system, or let the file extension decide), music, videos (with optional subtitles) and PDFs
+
+  They show on the site within a minute. Edit a game's title or cover, or delete files.
+  Each file can be up to 100 MB; upload bigger ones in the Cloudflare dashboard.
+  Files in the GitHub repo aren't listed here.
+- **Users:** search people, **ban** or unban (banned people can't send messages, make rooms, add friends or upload PDFs),
+  give **badges**, and make or remove other admins.
+- In **Chat** and **PDFs**, admins can delete anyone's messages and uploads.
+
+Uploads go through the Cloudflare Worker (`/api/admin/...` in `worker/index.mjs`). It checks your Supabase login
+and that your account is an admin before touching R2. `adminApiUrl` in `js/config.js` points the Render copy of the site at it.
+
 ## Chrome extensions (in the Web app)
 
 Open a website in the Web app and click the **puzzle button** to open **Extensions**. Then either:
@@ -156,6 +192,7 @@ Until the keys are added, the site runs in **setup mode**. Your profile is saved
 
 - `wispUrl`: the Wisp server for the web proxy (your Render address, `wss://…/wisp/`). Leave it blank to use the site's own server.
 - `mediaUrl`: your R2 bucket's public address, for files over 25 MB.
+- `adminApiUrl`: your Cloudflare site's address, where the Admin app uploads files (blank = the same site).
 - `youtubeApiKey`: a free YouTube Data API v3 key turns on YouTube search in Music. Without one, you can still paste YouTube links.
 - `liveChannels`: the official broadcaster live streams shown in TV. Each channel is a YouTube channel ID.
 
@@ -188,6 +225,9 @@ js/friends.js       friend requests and direct messages
 js/gamestats.js     game favourites, plays and play time
 js/cloudsaves.js    emulator cloud saves (used by play.html)
 js/xmas.js          Christmas lights, snow and countdown
+js/profilekit.js    display names, statuses, avatar decorations and badges
+js/announce.js      the announcement bar
+js/apps/admin.js    the admin panel (uploads use worker/index.mjs)
 js/apps/*.js        one file per app (games, music, videos, pdfs, books, tv, ai, chat, profile, settings, home)
 js/config.js        your settings
 js/themes.js        the 10 themes + fonts
