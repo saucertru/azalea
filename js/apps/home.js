@@ -7,6 +7,7 @@ import { onlineCount } from '../presence.js';
 import { mountClock } from '../widgets.js';
 import { gameCover } from './games.js';
 import { APPS } from './index.js';
+import { decorate, countdownEl } from '../xmas.js';
 
 const QUICK = ['games', 'ai', 'music', 'chat', 'videos'];
 
@@ -65,12 +66,15 @@ export default {
     const date = h('div', { class: 'clock-date' });
     const recent = h('div', { class: 'home-recent' });
 
-    el.append(h('div', { class: 'home2' },
+    const host = h('div', { class: 'home-host' });
+    el.append(host);
+    decorate(host);
+    host.append(h('div', { class: 'home2' },
       h('h1', { class: 'glow-logo' }, CONFIG.siteName.toLowerCase()),
       h('div', { class: 'home-search' }, h('span', { class: 'hs-ic', html: icon('search', 18) }), input,
         h('button', { class: 'hs-go', 'aria-label': 'Search', html: icon('back', 16), onClick: go }), sugg),
       quick, online,
-      h('div', { class: 'clock-card' }, time, date),
+      h('div', { class: 'clock-card' }, time, date, countdownEl('home')),
       recent));
 
     getManifest().then((m) => {

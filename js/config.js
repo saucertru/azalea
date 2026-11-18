@@ -1,8 +1,8 @@
 // =====================================================================
-// Azelela settings - edit these, then redeploy.
+// Azalea settings - edit these, then redeploy.
 // =====================================================================
 export const CONFIG = {
-  siteName: 'Azelela',
+  siteName: 'Azalea',
 
   // Supabase -> Project Settings -> API. The anon key is safe to put here
   // (Row Level Security in supabase/schema.sql protects the data).
@@ -19,6 +19,10 @@ export const CONFIG = {
   // The build lists the bucket and adds its files to the site.
   mediaUrl: 'https://pub-2fac51d89b02441bbf0005ec8bcbd3c0.r2.dev',
 
+  // Where the Admin app uploads files to R2: your Cloudflare site (the
+  // Worker in worker/index.mjs). Blank = this same site.
+  adminApiUrl: 'https://azalea.blazess-mc.workers.dev',
+
   // Optional. A free YouTube Data API v3 key turns on YouTube search in
   // Music. Without it you can still paste YouTube links.
   youtubeApiKey: '',
@@ -33,12 +37,5 @@ export const CONFIG = {
     { name: 'ABC News Australia', channel: 'UCVgO39Bk5sMo66-6o6Spn6Q' },
     { name: 'Sky News', channel: 'UCoMdktPbSTixAyNGwb-UYkQ' },
     { name: 'NASA', channel: 'UCLA_DiR1FfKNvjuUpBHmylQ' },
-  ],
-
-  // Public-domain TV and films from the Internet Archive
-  archiveCollections: [
-    { id: 'classic_tv', name: 'Classic TV' },
-    { id: 'feature_films', name: 'Public domain films' },
-    { id: 'classic_cartoons', name: 'Classic cartoons' },
   ],
 };

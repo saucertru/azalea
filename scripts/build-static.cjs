@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /*
- * Build for Cloudflare Pages (or any static host): puts everything the
+ * Build for Cloudflare (or any static host): puts everything the
  * website needs into dist/.
  *   npm run build:pages    ->  dist/
  *
  * - copies the site and your small content files
- * - copies the Scramjet web proxy files (/scram, /baremux, /libcurl)
+ * - copies the web proxy files (/scramjet, /controller, /libcurl)
  * - writes dist/manifest.json, including big files from your R2 bucket
  * - leaves out any local file over 25 MiB (Pages rejects them) and tells you
  */
 const fs = require('fs');
 const path = require('path');
-const { buildManifestAsync, ROOT } = require('./build-manifest.cjs');
+const { buildManifestAsync, localFiles, readLocalMeta, ROOT, proxyDirs, PROXY_FILES } = require('./build-manifest.cjs');
 
 const OUT = path.join(ROOT, 'dist');
 const MAX = 25 * 1024 * 1024; // Cloudflare Pages per-file limit
@@ -48,15 +48,23 @@ async function main() {
   }
 
   // web proxy files (same paths the Node server uses)
-  const proxy = {
-    scram: require('@mercuryworkshop/scramjet/path').scramjetPath,
-    baremux: require('@mercuryworkshop/bare-mux/node').baremuxPath,
-    libcurl: require('@mercuryworkshop/libcurl-transport').libcurlPath,
-  };
-  for (const [name, dir] of Object.entries(proxy)) copy(dir, path.join(OUT, name), name);
+  for (const [name, dir] of Object.entries(proxyDirs())) {
+    fs.mkdirSync(path.join(OUT, name), { recursive: true });
+    for (const f of PROXY_FILES[name]) copy(path.join(dir, f), path.join(OUT, name, f), `${name}/${f}`);
+  }
 
   const { manifest: m, report } = await buildManifestAsync({ maxLocalSize: MAX });
   fs.writeFileSync(path.join(OUT, 'manifest.json'), JSON.stringify(m));
+
+  // For the Cloudflare Worker (worker/index.mjs): the local content files, so
+  // it can merge them with whatever is in R2 right now.
+  const local = localFiles().filter((f) => f.size <= MAX);
+  const metas = {};
+  for (const f of local) if (f.rel.endsWith('/game.json')) metas[f.rel] = readLocalMeta(f);
+  fs.writeFileSync(
+    path.join(OUT, 'content-index.json'),
+    JSON.stringify({ files: local.map(({ rel, url, size }) => ({ rel, url, size })), metas })
+  );
 
   console.log(`dist/: ${copied} files`);
   console.log(`manifest: ${m.games.length} games, ${m.music.length} songs, ${m.pdfs.length} PDFs, ${m.videos.length} videos`);

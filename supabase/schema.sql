@@ -1,5 +1,5 @@
 -- =====================================================================
--- Azelela - Supabase schema
+-- Azalea - Supabase schema
 -- Paste this whole file into Supabase -> SQL Editor -> New query -> Run.
 -- Safe to run more than once.
 -- =====================================================================
@@ -136,9 +136,11 @@ drop policy if exists "see rooms" on public.rooms;
 create policy "see rooms" on public.rooms
   for select using (is_private = false or public.is_room_member(id));
 
+-- you can see who's in the rooms you're in (needed to show DM names)
 drop policy if exists "see own memberships" on public.room_members;
-create policy "see own memberships" on public.room_members
-  for select using (user_id = auth.uid());
+drop policy if exists "see members of my rooms" on public.room_members;
+create policy "see members of my rooms" on public.room_members
+  for select using (user_id = auth.uid() or public.is_room_member(room_id));
 
 drop policy if exists "leave rooms" on public.room_members;
 create policy "leave rooms" on public.room_members
@@ -269,3 +271,332 @@ create policy "delete own files" on storage.objects
   for delete to authenticated
   using (bucket_id in ('avatars', 'banners', 'pdfs')
          and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- =====================================================================
+-- v1.3: game stats, friends + direct messages, emulator cloud saves
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- GAME STATS (favourites, plays, play time) - public, so profiles can
+-- show "most played"; only you can change yours.
+-- ---------------------------------------------------------------------
+create table if not exists public.game_stats (
+  user_id      uuid not null references public.profiles (id) on delete cascade,
+  game_id      text not null check (char_length(game_id) between 1 and 200),
+  title        text check (char_length(title) <= 200),
+  plays        integer not null default 0 check (plays >= 0),
+  seconds      integer not null default 0 check (seconds >= 0),
+  favourite    boolean not null default false,
+  last_played  timestamptz,
+  primary key (user_id, game_id)
+);
+create index if not exists game_stats_user_seconds on public.game_stats (user_id, seconds desc);
+alter table public.game_stats enable row level security;
+
+drop policy if exists "game stats are public" on public.game_stats;
+create policy "game stats are public" on public.game_stats for select using (true);
+drop policy if exists "add own game stats" on public.game_stats;
+create policy "add own game stats" on public.game_stats
+  for insert to authenticated with check (user_id = auth.uid());
+drop policy if exists "update own game stats" on public.game_stats;
+create policy "update own game stats" on public.game_stats
+  for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+drop policy if exists "delete own game stats" on public.game_stats;
+create policy "delete own game stats" on public.game_stats
+  for delete to authenticated using (user_id = auth.uid());
+
+-- ---------------------------------------------------------------------
+-- FRIENDS: requests by username; accepted friends can DM each other
+-- ---------------------------------------------------------------------
+create table if not exists public.friendships (
+  id          uuid primary key default gen_random_uuid(),
+  requester   uuid not null references public.profiles (id) on delete cascade,
+  addressee   uuid not null references public.profiles (id) on delete cascade,
+  status      text not null default 'pending' check (status in ('pending', 'accepted')),
+  created_at  timestamptz not null default now(),
+  check (requester <> addressee)
+);
+-- one row per pair, whichever way round
+create unique index if not exists friendships_pair
+  on public.friendships (least(requester, addressee), greatest(requester, addressee));
+alter table public.friendships enable row level security;
+
+drop policy if exists "see own friendships" on public.friendships;
+create policy "see own friendships" on public.friendships
+  for select using (auth.uid() in (requester, addressee));
+-- removing a friend / cancelling / declining a request
+drop policy if exists "remove own friendships" on public.friendships;
+create policy "remove own friendships" on public.friendships
+  for delete using (auth.uid() in (requester, addressee));
+
+-- Send a request by username. If they already asked you, you become friends.
+create or replace function public.send_friend_request(friend_name text)
+returns public.friendships language plpgsql security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  them uuid;
+  f public.friendships;
+begin
+  if me is null then raise exception 'Not logged in'; end if;
+  select id into them from public.profiles where lower(username) = lower(trim(friend_name));
+  if them is null then raise exception 'No one with that username'; end if;
+  if them = me then raise exception 'That''s you!'; end if;
+  select * into f from public.friendships
+   where least(requester, addressee) = least(me, them) and greatest(requester, addressee) = greatest(me, them);
+  if found then
+    if f.status = 'pending' and f.addressee = me then
+      update public.friendships set status = 'accepted' where id = f.id returning * into f;
+    end if;
+    return f;
+  end if;
+  insert into public.friendships (requester, addressee) values (me, them) returning * into f;
+  return f;
+end $$;
+grant execute on function public.send_friend_request(text) to authenticated;
+
+-- Accept a request someone sent you
+create or replace function public.accept_friend_request(request_id uuid)
+returns public.friendships language plpgsql security definer set search_path = public as $$
+declare f public.friendships;
+begin
+  update public.friendships set status = 'accepted'
+   where id = request_id and addressee = auth.uid() and status = 'pending'
+   returning * into f;
+  if not found then raise exception 'Request not found'; end if;
+  return f;
+end $$;
+grant execute on function public.accept_friend_request(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- DIRECT MESSAGES: a private two-person room (kind = 'dm'), no join code.
+-- They use the normal messages table, so chat works the same.
+-- ---------------------------------------------------------------------
+alter table public.rooms add column if not exists kind text not null default 'room';
+alter table public.rooms drop constraint if exists rooms_kind_check;
+alter table public.rooms add constraint rooms_kind_check check (kind in ('room', 'dm'));
+
+-- Open (or create) the DM with a friend
+create or replace function public.open_dm(friend uuid)
+returns public.rooms language plpgsql security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  r public.rooms;
+begin
+  if me is null then raise exception 'Not logged in'; end if;
+  if not exists (
+    select 1 from public.friendships
+     where status = 'accepted'
+       and least(requester, addressee) = least(me, friend)
+       and greatest(requester, addressee) = greatest(me, friend)
+  ) then raise exception 'You can only message friends'; end if;
+  select rm.* into r from public.rooms rm
+   where rm.kind = 'dm'
+     and exists (select 1 from public.room_members a where a.room_id = rm.id and a.user_id = me)
+     and exists (select 1 from public.room_members b where b.room_id = rm.id and b.user_id = friend)
+   limit 1;
+  if found then return r; end if;
+  insert into public.rooms (name, is_private, kind, created_by)
+  values ('Direct message', true, 'dm', me) returning * into r;
+  insert into public.room_members (room_id, user_id) values (r.id, me), (r.id, friend);
+  return r;
+end $$;
+grant execute on function public.open_dm(uuid) to authenticated;
+
+-- unfriending closes your shared DM (it can be reopened if you're friends again)
+create or replace function public.friendship_removed()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.rooms rm
+   where rm.kind = 'dm'
+     and exists (select 1 from public.room_members a where a.room_id = rm.id and a.user_id = old.requester)
+     and exists (select 1 from public.room_members b where b.room_id = rm.id and b.user_id = old.addressee);
+  return old;
+end $$;
+drop trigger if exists friendship_removed on public.friendships;
+create trigger friendship_removed after delete on public.friendships
+  for each row execute function public.friendship_removed();
+
+-- live updates for friend requests
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'friendships'
+  ) then
+    alter publication supabase_realtime add table public.friendships;
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- EMULATOR CLOUD SAVES: private bucket, each user only sees their own
+-- folder (saves/<user id>/<game>.state and .srm)
+-- ---------------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('saves', 'saves', false, 52428800)
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit;
+
+drop policy if exists "read own saves" on storage.objects;
+create policy "read own saves" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'saves' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "write own saves" on storage.objects;
+create policy "write own saves" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'saves' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "update own saves" on storage.objects;
+create policy "update own saves" on storage.objects
+  for update to authenticated
+  using (bucket_id = 'saves' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "delete own saves" on storage.objects;
+create policy "delete own saves" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'saves' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- =====================================================================
+-- v1.4: Discord-style profiles + admin tools
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- PROFILE CUSTOMIZATION
+-- ---------------------------------------------------------------------
+alter table public.profiles add column if not exists display_name  text;
+alter table public.profiles add column if not exists pronouns      text;
+alter table public.profiles add column if not exists status        text not null default 'online';
+alter table public.profiles add column if not exists status_text   text;
+alter table public.profiles add column if not exists status_emoji  text;
+alter table public.profiles add column if not exists theme_primary text;
+alter table public.profiles add column if not exists theme_accent  text;
+alter table public.profiles add column if not exists banner_color  text;
+alter table public.profiles add column if not exists avatar_deco   text;
+alter table public.profiles add column if not exists badges        text[] not null default '{}';
+alter table public.profiles add column if not exists is_admin      boolean not null default false;
+alter table public.profiles add column if not exists banned        boolean not null default false;
+
+alter table public.profiles drop constraint if exists profiles_custom_check;
+alter table public.profiles add constraint profiles_custom_check check (
+  (display_name is null or char_length(display_name) between 1 and 32)
+  and (pronouns is null or char_length(pronouns) <= 40)
+  and status in ('online', 'idle', 'dnd', 'invisible')
+  and (status_text is null or char_length(status_text) <= 80)
+  and (status_emoji is null or char_length(status_emoji) <= 16)
+  and (theme_primary is null or theme_primary ~ '^#[0-9a-fA-F]{6}$')
+  and (theme_accent is null or theme_accent ~ '^#[0-9a-fA-F]{6}$')
+  and (banner_color is null or banner_color ~ '^#[0-9a-fA-F]{6}$')
+  and (avatar_deco is null or avatar_deco in ('snow', 'holly', 'neon', 'gold', 'flame', 'rainbow', 'hearts', 'pixel'))
+  and cardinality(badges) <= 12
+);
+
+-- helpers
+create or replace function public.is_admin()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select is_admin from public.profiles where id = auth.uid()), false);
+$$;
+create or replace function public.is_banned()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select banned from public.profiles where id = auth.uid()), false);
+$$;
+grant execute on function public.is_admin() to anon, authenticated;
+
+-- Only admins can change admin / banned / badges. (The SQL editor, where
+-- there's no logged-in user, can change anything.)
+create or replace function public.protect_profile_columns()
+returns trigger language plpgsql as $$
+begin
+  new.id := old.id;
+  new.created_at := old.created_at;
+  if auth.uid() is not null and not public.is_admin() then
+    new.is_admin := old.is_admin;
+    new.banned := old.banned;
+    new.badges := old.badges;
+  end if;
+  -- nobody can remove their own admin by accident
+  if auth.uid() = old.id and old.is_admin then new.is_admin := true; end if;
+  return new;
+end $$;
+
+-- admins can edit anyone's profile (to ban, give badges, or clear a bad bio)
+drop policy if exists "admins update profiles" on public.profiles;
+create policy "admins update profiles" on public.profiles
+  for update using (public.is_admin()) with check (public.is_admin());
+
+-- banned users can't send messages, make rooms, add friends or upload PDFs
+drop policy if exists "send messages" on public.messages;
+create policy "send messages" on public.messages
+  for insert to authenticated
+  with check (user_id = auth.uid() and public.can_see_room(room_id) and not public.is_banned());
+
+drop policy if exists "upload own pdfs" on public.pdf_uploads;
+create policy "upload own pdfs" on public.pdf_uploads
+  for insert to authenticated with check (user_id = auth.uid() and not public.is_banned());
+
+create or replace function public.check_not_banned()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if public.is_banned() then raise exception 'Your account is banned'; end if;
+  return new;
+end $$;
+drop trigger if exists rooms_not_banned on public.rooms;
+create trigger rooms_not_banned before insert on public.rooms
+  for each row execute function public.check_not_banned();
+drop trigger if exists friendships_not_banned on public.friendships;
+create trigger friendships_not_banned before insert on public.friendships
+  for each row execute function public.check_not_banned();
+
+-- moderation: admins can delete any message or PDF
+drop policy if exists "admins delete messages" on public.messages;
+create policy "admins delete messages" on public.messages
+  for delete using (public.is_admin());
+drop policy if exists "admins delete pdfs" on public.pdf_uploads;
+create policy "admins delete pdfs" on public.pdf_uploads
+  for delete using (public.is_admin());
+drop policy if exists "admins delete pdf files" on storage.objects;
+create policy "admins delete pdf files" on storage.objects
+  for delete to authenticated using (bucket_id = 'pdfs' and public.is_admin());
+
+-- ---------------------------------------------------------------------
+-- SITE SETTINGS (the announcement bar) - everyone reads, admins write
+-- ---------------------------------------------------------------------
+create table if not exists public.site_settings (
+  id            int primary key default 1 check (id = 1),
+  announcement  text check (char_length(announcement) <= 300),
+  updated_at    timestamptz not null default now()
+);
+insert into public.site_settings (id) values (1) on conflict do nothing;
+alter table public.site_settings enable row level security;
+drop policy if exists "site settings are public" on public.site_settings;
+create policy "site settings are public" on public.site_settings for select using (true);
+drop policy if exists "admins edit site settings" on public.site_settings;
+create policy "admins edit site settings" on public.site_settings
+  for update using (public.is_admin()) with check (public.is_admin());
+
+-- ---------------------------------------------------------------------
+-- ADMIN STATS
+-- ---------------------------------------------------------------------
+create or replace function public.admin_stats()
+returns json language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'Admins only'; end if;
+  return json_build_object(
+    'users',        (select count(*) from public.profiles),
+    'new_users_7d', (select count(*) from public.profiles where created_at > now() - interval '7 days'),
+    'banned',       (select count(*) from public.profiles where banned),
+    'messages',     (select count(*) from public.messages),
+    'messages_24h', (select count(*) from public.messages where created_at > now() - interval '1 day'),
+    'rooms',        (select count(*) from public.rooms where kind = 'room'),
+    'dms',          (select count(*) from public.rooms where kind = 'dm'),
+    'friendships',  (select count(*) from public.friendships where status = 'accepted'),
+    'pdfs',         (select count(*) from public.pdf_uploads),
+    'plays',        (select coalesce(sum(plays), 0) from public.game_stats),
+    'play_seconds', (select coalesce(sum(seconds), 0) from public.game_stats),
+    'top_games',    (select coalesce(json_agg(t), '[]'::json) from (
+                      select game_id, max(title) as title, sum(plays) as plays, sum(seconds) as seconds,
+                             count(*) filter (where favourite) as favourites
+                        from public.game_stats group by game_id order by sum(seconds) desc limit 10) t)
+  );
+end $$;
+grant execute on function public.admin_stats() to authenticated;
+
+-- ---------------------------------------------------------------------
+-- MAKE YOURSELF ADMIN: run this once with your own username
+--   update public.profiles set is_admin = true where lower(username) = lower('YOUR_USERNAME');
+-- ---------------------------------------------------------------------

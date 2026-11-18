@@ -1,14 +1,17 @@
+import { decorate, countdownEl } from './xmas.js';
+import './cloudsaves.js';
+import { showAnnouncement } from './announce.js';
 import { CONFIG } from './config.js';
 import { h, $, icon, toast, avatarEl, esc } from './ui.js';
-import { settings, saveSettings, on } from './store.js';
+import { settings, saveSettings, on, emit } from './store.js';
 import { applyTheme, THEMES } from './themes.js';
-import { session, initAuth, signUp, signIn, signOut, validUsername, usernameAvailable } from './auth.js';
+import { session, initAuth, signUp, signIn, signOut, validUsername, usernameAvailable, continueAsGuest } from './auth.js';
 import { configured, sb } from './supabase.js';
-import { APPS, APP_ORDER } from './apps/index.js';
+import { APPS, visibleApps } from './apps/index.js';
 import { mountMini } from './apps/music.js';
-import { APP_COLORS, appTile, findApp, searchAll, webSearch, openGame, LOGO_SVG } from './appmeta.js';
+import { APP_COLORS, appTile, findApp, searchAll, webSearch, openGame } from './appmeta.js';
 import { startPresence } from './presence.js';
-import { looksLikeUrl, wakeWisp } from './proxy.js';
+import { looksLikeUrl, wakeWisp, setOpener } from './proxy.js';
 import { mountClock, mountWeather, mountSystem } from './widgets.js';
 
 const appRoot = $('#app');
@@ -47,7 +50,29 @@ function showOnboarding(startStep) {
   let step = startStep;
   let mode = 'signup';
   const root = h('div', { class: 'onboard' });
-  appRoot.replaceChildren(root);
+
+  // The real home screen sits behind the onboarding window (dimmed and not
+  // clickable), so people can see what they're setting up. It's rebuilt
+  // when they pick a different look.
+  let shownLayout = null;
+  function backdrop() {
+    if (shownLayout === draft.layout && root.isConnected) return;
+    shownLayout = draft.layout;
+    teardownShell();
+    document.body.classList.toggle('layout-desktop', draft.layout === 'desktop');
+    try {
+      shell = draft.layout === 'desktop' ? buildDesktop() : buildBrowser();
+    } catch (e) {
+      console.error(e);
+      appRoot.replaceChildren();
+    }
+    const behind = appRoot.firstElementChild;
+    if (behind) {
+      behind.inert = true;
+      behind.classList.add('ob-behind');
+    }
+    appRoot.append(root);
+  }
 
   const dots = () => h('div', { class: 'ob-dots' }, [0, 1, 2].map((i) => h('span', { class: i === step ? 'on' : i < step ? 'done' : '' })));
 
@@ -99,7 +124,7 @@ function showOnboarding(startStep) {
       h('button', { class: mode === 'signup' ? 'on' : '', onClick: () => { mode = 'signup'; render(); } }, 'Create account'),
       h('button', { class: mode === 'login' ? 'on' : '', onClick: () => { mode = 'login'; render(); } }, 'Log in'));
 
-    const email = h('input', { class: 'input', type: 'email', placeholder: 'you@example.com', autocomplete: 'email' });
+    const email = h('input', { class: 'input', type: 'email', placeholder: 'Email', autocomplete: 'email' });
     const pass = h('input', { class: 'input', type: 'password', placeholder: mode === 'signup' ? 'At least 6 characters' : 'Password', autocomplete: mode === 'signup' ? 'new-password' : 'current-password' });
 
     if (mode === 'login') {
@@ -125,7 +150,7 @@ function showOnboarding(startStep) {
       return h('div', { class: 'ob-card' }, dots(), h('h1', {}, 'Welcome back'), tabs,
         h('label', { class: 'field' }, h('span', {}, 'Email'), email),
         h('label', { class: 'field' }, h('span', {}, 'Password'), pass),
-        err, go, forgot);
+        err, go, forgot, guestBtn());
     }
 
     const user = h('input', { class: 'input', placeholder: 'Pick a username', maxlength: 20, autocomplete: 'username' });
@@ -173,7 +198,17 @@ function showOnboarding(startStep) {
       h('label', { class: 'field' }, h('span', {}, 'Username'), user, hint),
       h('label', { class: 'field' }, h('span', {}, 'Email'), email),
       h('label', { class: 'field' }, h('span', {}, 'Password'), pass),
-      err, go);
+      err, go, guestBtn());
+  }
+
+  function guestBtn() {
+    return h('div', { class: 'ob-guest' },
+      h('span', { class: 'muted' }, 'or'),
+      h('button', {
+        class: 'link-btn',
+        title: 'No account needed. Chat and PDF uploads need an account, and you can make one any time.',
+        onClick: () => { continueAsGuest(); afterAccount(); },
+      }, 'Continue as guest'));
   }
 
   function themeStep() {
@@ -196,7 +231,7 @@ function showOnboarding(startStep) {
         onClick: () => { draft.accent = c; render(); },
       })),
       custom);
-    return h('div', { class: 'ob-card wide' }, dots(), h('h1', {}, 'Pick a theme'),
+    return h('div', { class: 'ob-card' }, dots(), h('h1', {}, 'Pick a theme'),
       grid,
       h('h3', { class: 'ob-sub' }, 'Accent colour'), accents,
       h('div', { class: 'ob-nav' },
@@ -207,11 +242,11 @@ function showOnboarding(startStep) {
   function layoutStep() {
     const card = (id, title, desc, mock) => h('button', {
       class: `layout-card${draft.layout === id ? ' on' : ''}`,
-      onClick: () => { draft.layout = id; render(); },
+      onClick: () => { draft.layout = id; backdrop(); render(); },
     }, mock, h('b', {}, title), h('span', { class: 'muted small' }, desc));
     const browserMock = h('div', { class: 'mock mock-browser' }, h('div', { class: 'mb-side' }), h('div', { class: 'mb-main' }, h('i'), h('i'), h('i'), h('i')));
     const desktopMock = h('div', { class: 'mock mock-desktop' }, h('div', { class: 'md-icons' }, h('i'), h('i'), h('i')), h('div', { class: 'md-win' }), h('div', { class: 'md-bar' }));
-    return h('div', { class: 'ob-card wide' }, dots(), h('h1', {}, 'Choose your look'),
+    return h('div', { class: 'ob-card' }, dots(), h('h1', {}, 'Choose your look'),
       h('div', { class: 'layout-grid' },
         card('browser', 'Browser page', 'A normal website with a sidebar', browserMock),
         card('desktop', 'Desktop', 'Windows, icons and a taskbar', desktopMock)),
@@ -222,7 +257,10 @@ function showOnboarding(startStep) {
 
   function render() {
     const card = step === 0 ? accountStep() : step === 1 ? themeStep() : layoutStep();
-    root.replaceChildren(h('div', { class: 'ob-brand' }, h('img', { class: 'brand-icon', src: 'assets/icon.png', alt: '' }), CONFIG.siteName), card);
+    const win = h('div', { class: 'ob-window', role: 'dialog', 'aria-label': `Welcome to ${CONFIG.siteName}` },
+      h('div', { class: 'ob-brand' }, h('img', { class: 'brand-icon', src: 'assets/icon.png', alt: '' }), CONFIG.siteName), card);
+    root.replaceChildren(win);
+    backdrop();
     card.querySelector('input')?.focus();
   }
   render();
@@ -242,6 +280,8 @@ function friendlyError(e, fallback) {
 // =====================================================================
 let shell = null; // { layout, cleanup() }
 let browserNav = null; // set by the browser layout
+let browserNewTab = null;
+let viewControls = null; // { close(view), activate(view) } from the current layout
 
 const ctx = {
   get layout() { return settings.layout; },
@@ -251,11 +291,19 @@ const ctx = {
     else if (browserNav) browserNav(appId, params);
     else location.hash = `#/${appId}${toQuery(params)}`;
   },
+  /** Opens an app in a NEW tab (browser) or a new window (desktop). */
+  openNew(appId, params = {}) {
+    if (!APPS[appId]) return;
+    if (settings.layout === 'desktop') wm.openExtra(appId, params);
+    else if (browserNewTab) browserNewTab(appId, params);
+  },
+  /** Close / bring forward the tab or window that shows `view`. */
+  closeView(view) { viewControls?.close(view); },
+  activateView(view) { viewControls?.activate(view); },
   /** Desktop: opens a URL in its own window and returns true. Browser: returns false. */
   openFrame(title, url, opts = {}) {
-    if (settings.layout !== 'desktop') return false;
-    wm.frame(title, url, opts);
-    return true;
+    if (settings.layout !== 'desktop') return null;
+    return wm.frame(title, url, opts); // the window's iframe
   },
 };
 
@@ -288,6 +336,9 @@ function startShell() {
   document.body.classList.toggle('layout-desktop', settings.layout === 'desktop');
   shell = settings.layout === 'desktop' ? buildDesktop() : buildBrowser();
   startPresence();
+  showAnnouncement().catch(() => {});
+  // extensions' chrome.tabs.create opens a new Web tab/window
+  setOpener((url, { active, token }) => ctx.openNew('web', { url, _t: token, ...(active ? {} : { _bg: '1' }) }));
 }
 
 let lastLayout = settings.layout;
@@ -311,7 +362,7 @@ function buildBrowser() {
   const rail = h('nav', { class: 'rail' },
     railBtn('home'),
     h('div', { class: 'rail-apps' }, RAIL_APPS.map(railBtn)),
-    h('div', { class: 'rail-bottom' }, railBtn('profile'), railBtn('settings')));
+    h('div', { class: 'rail-bottom' }, session.profile?.is_admin ? railBtn('admin') : null, railBtn('profile'), railBtn('settings')));
 
   // ---- tab strip + toolbar
   const tabsEl = h('div', { class: 'tabs' });
@@ -403,6 +454,7 @@ function buildBrowser() {
   }
 
   function activate(tab) {
+    const changed = active !== tab;
     active = tab;
     for (const t of tabs) {
       t.pane.hidden = t !== tab;
@@ -410,6 +462,7 @@ function buildBrowser() {
     }
     tab.el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
     if (tab.appId) updateChrome();
+    if (changed) emit('view-activated', tab.view);
   }
 
   function closeTab(tab) {
@@ -437,6 +490,16 @@ function buildBrowser() {
     navigate(active, appId, params, true);
   }
   browserNav = nav;
+  browserNewTab = (appId, params) => {
+    const prev = active;
+    const { _bg, ...rest } = params;
+    newTab(appId, rest);
+    if (_bg && prev) activate(prev);
+  };
+  viewControls = {
+    close: (view) => { const t = tabs.find((x) => x.view === view); if (t) closeTab(t); },
+    activate: (view) => { const t = tabs.find((x) => x.view === view); if (t && t !== active) activate(t); },
+  };
 
   // ---- address bar
   address.addEventListener('focus', () => address.select());
@@ -483,6 +546,8 @@ function buildBrowser() {
     layout: 'browser',
     cleanup() {
       browserNav = null;
+      browserNewTab = null;
+      viewControls = null;
       ctx.webNavigated = null;
       window.removeEventListener('hashchange', onHash);
       document.removeEventListener('keydown', onKey);
@@ -509,7 +574,7 @@ const wm = {
     if (existing) {
       if (Object.keys(params).length) {
         existing.cleanup();
-        existing.cleanup = mountApp(appId, existing.body, params);
+        existing.cleanup = mountApp(appId, existing.view, params);
       }
       this.show(existing);
       return;
@@ -517,16 +582,30 @@ const wm = {
     this.create({ key: appId, title: app.name, iconName: app.icon, mount: (body) => mountApp(appId, body, params) });
   },
 
+  extraSeq: 0,
+  /** Another window for an app that already has one (e.g. a 2nd Web window). */
+  openExtra(appId, params = {}) {
+    const app = APPS[appId];
+    const { _bg, ...rest } = params;
+    const key = `${appId}-${++this.extraSeq}`;
+    const prev = this.top;
+    this.create({ key, title: app.name, iconName: app.icon, mount: (body) => mountApp(appId, body, rest) });
+    if (_bg && prev) this.focus(prev);
+  },
+
   frame(title, url, { iconName = 'games', width, height } = {}) {
     const key = `frame-${Date.now()}`;
+    const frame = h('iframe', { src: url, allow: 'autoplay; fullscreen; gamepad; clipboard-write', allowfullscreen: true, title });
     this.create({
       key, title, iconName, width, height,
-      mount: (body) => {
+      mount: (view, body) => {
+        view.remove();
         body.className = 'win-body frame-body';
-        body.append(h('iframe', { src: url, allow: 'autoplay; fullscreen; gamepad; clipboard-write', allowfullscreen: true, title }));
+        body.append(frame);
         return () => {};
       },
     });
+    return frame;
   },
 
   create({ key, title, iconName, mount, width = 960, height = 620 }) {
@@ -536,7 +615,9 @@ const wm = {
     const left = Math.max(10, Math.round((vw - w) / 2 - 80 + off));
     const top = Math.max(10, Math.round((vh - hgt) / 2 - 60 + off));
 
-    const body = h('div', { class: 'win-body' });
+    // the app mounts into `view`; `body` keeps the window's own layout styles
+    const view = h('div', { class: 'app-view' });
+    const body = h('div', { class: 'win-body' }, view);
     const head = h('div', { class: 'win-head' },
       h('span', { class: 'win-icon', html: icon(iconName, 16) }),
       h('span', { class: 'win-title' }, title),
@@ -546,12 +627,12 @@ const wm = {
         h('button', { class: 'close', 'aria-label': 'Close', html: icon('close', 14), onClick: () => this.close(win) })));
     const el = h('div', { class: 'win', style: { left: `${left}px`, top: `${top}px`, width: `${w}px`, height: `${hgt}px` } }, head, body);
     const pinned = this.pinned.get(key);
-    const colorKey = APP_COLORS[key] ? key : ({ games: 'games', pdf: 'pdfs', book: 'books', tv: 'tv' }[iconName] || 'games');
-    const [c1, c2] = APP_COLORS[colorKey];
+    const colorKey = APP_COLORS[key] ? key : ({ games: 'games', pdf: 'pdfs', book: 'books', tv: 'tv', globe: 'web' }[iconName] || 'games');
+    const [, c2] = APP_COLORS[colorKey];
     const task = pinned || h('button', { class: 'dock-app', title, 'aria-label': title, onClick: () => (win.min || this.top !== win ? this.show(win) : this.minimise(win)) },
-      h('span', { class: 'app-tile', style: { width: '34px', height: '34px', borderRadius: '10px', background: `linear-gradient(160deg, ${c1}, ${c2})` }, html: icon(iconName, 17) }));
+      h('span', { class: 'app-tile', style: { width: '34px', height: '34px', borderRadius: '8px', background: c2 }, html: icon(iconName, 17) }));
     task.classList.add('running');
-    const win = { key, el, body, task, pinned: Boolean(pinned), min: false, max: false, cleanup: () => {} };
+    const win = { key, el, body, view, task, pinned: Boolean(pinned), min: false, max: false, cleanup: () => {} };
     this.wins.set(key, win);
     this.layer.append(el);
     if (!pinned) this.bar.append(task);
@@ -560,7 +641,7 @@ const wm = {
     this.makeDraggable(win, head);
     if (vw < 700) this.toggleMax(win);
     this.focus(win);
-    win.cleanup = mount(body) || (() => {});
+    win.cleanup = mount(view, body) || (() => {});
     return win;
   },
 
@@ -603,6 +684,7 @@ const wm = {
       w.el.classList.toggle('focused', w === win);
       w.task.classList.toggle('active', w === win);
     }
+    emit('view-activated', win.view);
   },
   show(win) {
     win.min = false;
@@ -637,13 +719,12 @@ const wm = {
 };
 
 function buildDesktop() {
-  const DESK_APPS = APP_ORDER.filter((id) => id !== 'home');
+  const DESK_APPS = visibleApps().filter((id) => id !== 'home');
   const PINNED = ['web', 'games', 'music', 'videos', 'tv', 'chat', 'ai'];
 
   const icons = h('div', { class: 'desk-icons' }, DESK_APPS.map((id) =>
     h('button', { class: 'desk-icon', onClick: () => ctx.open(id), title: APPS[id].name },
       appTile(id, 50), h('span', { class: 'di-label' }, APPS[id].name))));
-  const logo = h('div', { class: 'desk-logo', html: LOGO_SVG });
 
   // right-hand widgets
   const bigTime = h('div', { class: 'w-time' });
@@ -651,7 +732,7 @@ function buildDesktop() {
   const weather = h('div', { class: 'w-weather' });
   const system = h('div', { class: 'w-system' });
   const widgets = h('aside', { class: 'desk-widgets' },
-    bigTime, bigDate,
+    bigTime, bigDate, countdownEl('desk'),
     h('div', { class: 'w-head' }, 'Weather'), weather,
     h('div', { class: 'w-head' }, 'System'), system);
 
@@ -710,10 +791,10 @@ function buildDesktop() {
   const renderStart = () => {
     const p = session.profile;
     startMenu.replaceChildren(
-      h('div', { class: 'sm-user' }, avatarEl(p, 40), h('div', {}, h('b', {}, p?.username || 'Guest'), h('div', { class: 'muted small' }, session.offline ? 'Setup mode' : 'Signed in'))),
-      h('div', { class: 'sm-apps' }, APP_ORDER.map((id) =>
+      h('div', { class: 'sm-user' }, avatarEl(p, 40), h('div', {}, h('b', {}, p?.username || 'Guest'), h('div', { class: 'muted small' }, session.offline ? 'Setup mode' : session.guest ? 'Guest' : 'Signed in'))),
+      h('div', { class: 'sm-apps' }, visibleApps().map((id) =>
         h('button', { class: 'sm-app', onClick: () => { toggleStart(false); ctx.open(id); } }, appTile(id, 30), APPS[id].name))),
-      h('button', { class: 'sm-logout', onClick: () => signOut() }, h('span', { html: icon('logout', 16) }), session.offline ? 'Reset profile' : 'Log out'));
+      h('button', { class: 'sm-logout', onClick: () => signOut() }, h('span', { html: icon('logout', 16) }), session.offline ? 'Reset profile' : session.guest ? 'Log in or sign up' : 'Log out'));
   };
   renderStart();
   const startBtn = h('button', { class: 'start-btn', title: 'Start', 'aria-label': 'Start', onClick: (e) => { e.stopPropagation(); toggleStart(); } },
@@ -721,11 +802,16 @@ function buildDesktop() {
 
   const dock = h('div', { class: 'dock' }, startBtn, search, pinnedWrap, tasks, miniEl,
     h('div', { class: 'dock-clock' }, dockTime, dockDate));
-  const root = h('div', { class: 'shell desktop' }, logo, icons, widgets, layer, startMenu, dock);
+  const root = h('div', { class: 'shell desktop' }, icons, widgets, layer, startMenu, dock);
   appRoot.replaceChildren(root);
+  decorate(root, { snow: 44 });
 
   wm.layer = layer;
   wm.bar = tasks;
+  viewControls = {
+    close: (view) => { for (const w of wm.wins.values()) if (w.view === view) return wm.close(w); },
+    activate: (view) => { for (const w of wm.wins.values()) if (w.view === view) return wm.show(w); },
+  };
   const closeStart = (e) => {
     if (!startMenu.contains(e.target)) toggleStart(false);
     if (!search.contains(e.target)) closeResults();
@@ -755,6 +841,7 @@ function buildDesktop() {
   return {
     layout: 'desktop',
     cleanup() {
+      viewControls = null;
       wm.closeAll();
       document.removeEventListener('pointerdown', closeStart);
       window.removeEventListener('blur', blurStart);

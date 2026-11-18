@@ -79,4 +79,4 @@ http
     res.writeHead(200, { 'Content-Type': type, 'Content-Length': stat.size, 'Accept-Ranges': 'bytes' });
     fs.createReadStream(file).pipe(res);
   })
-  .listen(PORT, () => console.log(`azelela running at http://localhost:${PORT}`));
+  .listen(PORT, () => console.log(`Azalea running at http://localhost:${PORT}`));
