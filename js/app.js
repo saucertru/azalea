@@ -48,7 +48,29 @@ function showOnboarding(startStep) {
   let step = startStep;
   let mode = 'signup';
   const root = h('div', { class: 'onboard' });
-  appRoot.replaceChildren(root);
+
+  // The real home screen sits behind the onboarding window (dimmed and not
+  // clickable), so people can see what they're setting up. It's rebuilt
+  // when they pick a different look.
+  let shownLayout = null;
+  function backdrop() {
+    if (shownLayout === draft.layout && root.isConnected) return;
+    shownLayout = draft.layout;
+    teardownShell();
+    document.body.classList.toggle('layout-desktop', draft.layout === 'desktop');
+    try {
+      shell = draft.layout === 'desktop' ? buildDesktop() : buildBrowser();
+    } catch (e) {
+      console.error(e);
+      appRoot.replaceChildren();
+    }
+    const behind = appRoot.firstElementChild;
+    if (behind) {
+      behind.inert = true;
+      behind.classList.add('ob-behind');
+    }
+    appRoot.append(root);
+  }
 
   const dots = () => h('div', { class: 'ob-dots' }, [0, 1, 2].map((i) => h('span', { class: i === step ? 'on' : i < step ? 'done' : '' })));
 
@@ -100,7 +122,7 @@ function showOnboarding(startStep) {
       h('button', { class: mode === 'signup' ? 'on' : '', onClick: () => { mode = 'signup'; render(); } }, 'Create account'),
       h('button', { class: mode === 'login' ? 'on' : '', onClick: () => { mode = 'login'; render(); } }, 'Log in'));
 
-    const email = h('input', { class: 'input', type: 'email', placeholder: 'you@example.com', autocomplete: 'email' });
+    const email = h('input', { class: 'input', type: 'email', placeholder: 'Email', autocomplete: 'email' });
     const pass = h('input', { class: 'input', type: 'password', placeholder: mode === 'signup' ? 'At least 6 characters' : 'Password', autocomplete: mode === 'signup' ? 'new-password' : 'current-password' });
 
     if (mode === 'login') {
@@ -179,9 +201,12 @@ function showOnboarding(startStep) {
 
   function guestBtn() {
     return h('div', { class: 'ob-guest' },
-      h('span', { class: 'ob-or' }, 'or'),
-      h('button', { class: 'btn block', onClick: () => { continueAsGuest(); afterAccount(); } }, 'Continue as guest'),
-      h('div', { class: 'hint center' }, 'No account needed. Chat and PDF uploads need an account, and you can make one any time.'));
+      h('span', { class: 'muted' }, 'or'),
+      h('button', {
+        class: 'link-btn',
+        title: 'No account needed. Chat and PDF uploads need an account, and you can make one any time.',
+        onClick: () => { continueAsGuest(); afterAccount(); },
+      }, 'Continue as guest'));
   }
 
   function themeStep() {
@@ -204,7 +229,7 @@ function showOnboarding(startStep) {
         onClick: () => { draft.accent = c; render(); },
       })),
       custom);
-    return h('div', { class: 'ob-card wide' }, dots(), h('h1', {}, 'Pick a theme'),
+    return h('div', { class: 'ob-card' }, dots(), h('h1', {}, 'Pick a theme'),
       grid,
       h('h3', { class: 'ob-sub' }, 'Accent colour'), accents,
       h('div', { class: 'ob-nav' },
@@ -215,11 +240,11 @@ function showOnboarding(startStep) {
   function layoutStep() {
     const card = (id, title, desc, mock) => h('button', {
       class: `layout-card${draft.layout === id ? ' on' : ''}`,
-      onClick: () => { draft.layout = id; render(); },
+      onClick: () => { draft.layout = id; backdrop(); render(); },
     }, mock, h('b', {}, title), h('span', { class: 'muted small' }, desc));
     const browserMock = h('div', { class: 'mock mock-browser' }, h('div', { class: 'mb-side' }), h('div', { class: 'mb-main' }, h('i'), h('i'), h('i'), h('i')));
     const desktopMock = h('div', { class: 'mock mock-desktop' }, h('div', { class: 'md-icons' }, h('i'), h('i'), h('i')), h('div', { class: 'md-win' }), h('div', { class: 'md-bar' }));
-    return h('div', { class: 'ob-card wide' }, dots(), h('h1', {}, 'Choose your look'),
+    return h('div', { class: 'ob-card' }, dots(), h('h1', {}, 'Choose your look'),
       h('div', { class: 'layout-grid' },
         card('browser', 'Browser page', 'A normal website with a sidebar', browserMock),
         card('desktop', 'Desktop', 'Windows, icons and a taskbar', desktopMock)),
@@ -230,10 +255,10 @@ function showOnboarding(startStep) {
 
   function render() {
     const card = step === 0 ? accountStep() : step === 1 ? themeStep() : layoutStep();
-    const win = h('div', { class: `ob-window${step === 0 ? '' : ' wide'}`, role: 'dialog', 'aria-label': `Welcome to ${CONFIG.siteName}` },
+    const win = h('div', { class: 'ob-window', role: 'dialog', 'aria-label': `Welcome to ${CONFIG.siteName}` },
       h('div', { class: 'ob-brand' }, h('img', { class: 'brand-icon', src: 'assets/icon.png', alt: '' }), CONFIG.siteName), card);
     root.replaceChildren(win);
-    decorate(root);
+    backdrop();
     card.querySelector('input')?.focus();
   }
   render();
