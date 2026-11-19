@@ -3,5 +3,6 @@
   "description": "Outrun the police for as long as you can.",
   "controls": "Arrow keys or WASD to drive.",
   "color": "#ef4444",
-  "icon": "128.png"
+  "icon": "128.png",
+  "entry": "Game_Source/index.html"
 }

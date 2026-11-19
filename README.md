@@ -159,8 +159,8 @@ Sapphire, Scramjet and `scramjet-controller` versions must match each other.
 
 | Drop files here | What happens |
 |---|---|
-| `games/html5/<name>/index.html` | HTML5 game. Add `cover.png` for a thumbnail and `game.json` with `{ "title", "description" }` (optional). |
-| `games/webports/<name>/index.html` | Webport (Unity WebGL, Godot, etc.). Same layout as html5. |
+| `games/html5/<name>/index.html` | HTML5 game. `game.json` is optional: `{ "title", "description", "entry", "cover" }`. `entry` is the launch file when it isn't `index.html` (e.g. `"game.html"` or `"Game_Source/index.html"`). `cover` (or a `cover.png`/`icon`/`logo` image in the folder) is the thumbnail; without one the game gets a coloured tile. |
+| `games/webports/<name>/index.html` | Webport (Unity WebGL, Godot, etc.). Same layout and `game.json` as html5. |
 | `games/flash/*.swf` | Flash game, runs with **Ruffle**. |
 | `games/roms/*` | ROM, runs with **EmulatorJS**. The system comes from the file extension. For `.zip` or `.bin` files, use a system folder such as `games/roms/gba/` or `games/roms/psx/`. |
 | `music/Artist - Title.mp3` | Local music. The "Artist - Title" name gives the artist and helps find lyrics. |

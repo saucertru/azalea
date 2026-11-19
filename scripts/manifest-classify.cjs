@@ -88,27 +88,45 @@ function classify(files, metas) {
   };
 
   const games = [];
+  const inFolder = (dirRel, p) => p && !p.startsWith('/') && !p.includes('..') && byRel.has(`${dirRel}/${p}`);
   // html5 + webports
   for (const [sub, type] of [['html5', 'html5'], ['webports', 'webport']]) {
     const prefix = `games/${sub}/`;
+    // group files by their first-level folder (or '' for a loose html file)
+    const dirs = new Map();
     for (const f of files) {
       if (!f.rel.startsWith(prefix)) continue;
       const rest = f.rel.slice(prefix.length);
-      let m;
-      if ((m = rest.match(/^([^/]+)\/index\.html?$/i))) {
-        const dirRel = prefix + m[1];
-        const meta = metas.get(`${dirRel}/game.json`) || {};
-        const coverRel = meta.cover ? `${dirRel}/${meta.cover}` : null;
-        games.push({
-          id: `${type}-${slug(m[1])}`, type,
-          title: meta.title || pretty(m[1]),
-          description: meta.description || '',
-          src: f.url,
-          cover: (coverRel && byRel.get(coverRel)?.url) || folderCover(dirRel),
-        });
-      } else if (/^[^/]+\.html?$/i.test(rest)) {
-        games.push({ id: `${type}-${slug(rest)}`, type, title: pretty(rest), description: '', src: f.url, cover: sideImage(f.rel) });
+      const slash = rest.indexOf('/');
+      const dir = slash === -1 ? '' : rest.slice(0, slash);
+      (dirs.get(dir) || dirs.set(dir, []).get(dir)).push(slash === -1 ? rest : rest.slice(slash + 1));
+    }
+    for (const [dir, rels] of dirs) {
+      // a single html file sitting loose in the folder (no sub-folder)
+      if (dir === '') {
+        for (const r of rels) {
+          if (/^[^/]+\.html?$/i.test(r)) games.push({ id: `${type}-${slug(r)}`, type, title: pretty(r), description: '', src: byRel.get(prefix + r).url, cover: sideImage(prefix + r) });
+        }
+        continue;
       }
+      const dirRel = prefix + dir;
+      const meta = metas.get(`${dirRel}/game.json`) || {};
+      // launch file: an explicit "entry", else index.html, else the one loose html in the folder
+      let entry = inFolder(dirRel, meta.entry) ? meta.entry : null;
+      if (!entry) entry = rels.find((r) => /^index\.html?$/i.test(r));
+      if (!entry) { const tops = rels.filter((r) => /^[^/]+\.html?$/i.test(r)); if (tops.length === 1) entry = tops[0]; }
+      if (!entry) continue;
+      // cover: an explicit "cover", else the game's own "icon", else any
+      // cover/thumbnail/icon/logo file in the folder. Keep it inside the folder.
+      const pick = meta.cover || meta.icon;
+      const coverRel = inFolder(dirRel, pick) ? `${dirRel}/${pick}` : null;
+      games.push({
+        id: `${type}-${slug(dir)}`, type,
+        title: meta.title || meta.name || pretty(dir),
+        description: meta.description || '',
+        src: byRel.get(`${dirRel}/${entry}`).url,
+        cover: (coverRel && byRel.get(coverRel).url) || folderCover(dirRel),
+      });
     }
   }
   // flash
